@@ -1,0 +1,13 @@
+import torch
+BATCH_SIZE = 1;
+CROP_SIZE_W = 64;
+CROP_SIZE_H = 128;
+CROP_SIZE_D = 128;
+TEMPERATURE = 0.5;
+EXP_NAME = '1';
+NUM_NEGATIVES = 10;
+LEARNING_RATE = 0.001
+VIRTUAL_BATCH_SIZE = 2;
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu';
+SAMPLES_PER_MRI = 8;
+DETERMINISTIC = False;
