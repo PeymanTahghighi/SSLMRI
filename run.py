@@ -135,58 +135,58 @@ if __name__ == "__main__":
     #cache_mri_gradients();
 
     RESUME = True;
-model = UNet3D(
-        spatial_dims=3,
-        in_channels=1,
-        out_channels=1,
-        channels=(64, 128, 256, 512),
-        strides=(2, 2, 2),
-        num_res_units=2,
-        );
-if RESUME is True:
-    ckpt = torch.load('resume.ckpt');
-    model.load_state_dict(ckpt['model']);
+    model = UNet3D(
+            spatial_dims=3,
+            in_channels=1,
+            out_channels=1,
+            channels=(64, 128, 256, 512),
+            strides=(2, 2, 2),
+            num_res_units=2,
+            );
+    if RESUME is True:
+        ckpt = torch.load('resume.ckpt');
+        model.load_state_dict(ckpt['model']);
 
-model.to('cuda');
-scalar = torch.cuda.amp.grad_scaler.GradScaler();
-optimizer = optim.Adam(model.parameters(), lr = config.LEARNING_RATE);
-lr_scheduler = CosineAnnealingLR(optimizer, T_max=500, eta_min= 1e-4);
-summary_writer = SummaryWriter(os.path.join('exp', 'Unet3D-CosineLR-5e-3'));
-best_loss = 100;
-start_epoch = 0;
+    model.to('cuda');
+    scalar = torch.cuda.amp.grad_scaler.GradScaler();
+    optimizer = optim.Adam(model.parameters(), lr = config.LEARNING_RATE);
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=500, eta_min= 1e-4);
+    summary_writer = SummaryWriter(os.path.join('exp', 'Unet3D-CosineLR-5e-3'));
+    best_loss = 100;
+    start_epoch = 0;
 
-if RESUME is True:
-    optimizer.load_state_dict(ckpt['optimizer']);
-    best_loss = ckpt['best_loss'];
-    start_epoch = ckpt['epoch'];
-    print(f'Resuming from epoch:{start_epoch}');
+    if RESUME is True:
+        optimizer.load_state_dict(ckpt['optimizer']);
+        best_loss = ckpt['best_loss'];
+        start_epoch = ckpt['epoch'];
+        print(f'Resuming from epoch:{start_epoch}');
 
-train_loader, test_loader = get_loader(False, 200);
-sample_output_interval = 10;
-for epoch in range(start_epoch, 5000):
-    model.train();
-    train_loss = train(model, train_loader, optimizer, scalar); 
-    model.eval();
-    valid_loss = valid(model, test_loader);
-    summary_writer.add_scalar('train/loss', train_loss, epoch);
-    summary_writer.add_scalar('valid/loss', valid_loss, epoch);
-    if epoch %sample_output_interval == 0:
-        print('sampling outputs...');
-        save_examples(model, test_loader);
-    ckpt = {
-        'model': model.state_dict(),
-        'optimizer': optimizer.state_dict(),
-        'scheduler': lr_scheduler.state_dict(),
-        'best_loss': best_loss,
-        'epoch': epoch+1
-    }
-    torch.save(ckpt,'resume.ckpt');
-    lr_scheduler.step();
+    train_loader, test_loader = get_loader(False, 200);
+    sample_output_interval = 10;
+    for epoch in range(start_epoch, 5000):
+        model.train();
+        train_loss = train(model, train_loader, optimizer, scalar); 
+        model.eval();
+        valid_loss = valid(model, test_loader);
+        summary_writer.add_scalar('train/loss', train_loss, epoch);
+        summary_writer.add_scalar('valid/loss', valid_loss, epoch);
+        if epoch %sample_output_interval == 0:
+            print('sampling outputs...');
+            save_examples(model, test_loader);
+        ckpt = {
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': lr_scheduler.state_dict(),
+            'best_loss': best_loss,
+            'epoch': epoch+1
+        }
+        torch.save(ckpt,'resume.ckpt');
+        lr_scheduler.step();
 
-    if best_loss > valid_loss:
-        print(f'new best model found: {valid_loss}')
-        best_loss = valid_loss;
-        torch.save({'model': model.state_dict(), 'best_loss': best_loss},'best_model.ckpt');
+        if best_loss > valid_loss:
+            print(f'new best model found: {valid_loss}')
+            best_loss = valid_loss;
+            torch.save({'model': model.state_dict(), 'best_loss': best_loss},'best_model.ckpt');
 
 
 
