@@ -399,6 +399,7 @@ class UNet3D(nn.Module):
 
         self.final = nn.Sequential(
             ConvBlock(rev_channels[-1],1,1,1),
+            nn.Tanh()
         )
 
         self._init_weights();
