@@ -1,7 +1,3 @@
-from glob import iglob
-from shutil import copyfile
-from typing import Any
-import pandas
 import os
 import cv2
 from torch.utils.data import DataLoader, Dataset
@@ -17,14 +13,10 @@ import torch
 import config
 from sklearn.model_selection import train_test_split
 import nibabel as nib
-import imgaug.augmenters as iaa
-import skimage.util as utils
 from skimage.filters import gaussian, sobel, threshold_otsu, try_all_threshold
-import math
-import shutil
 from monai.transforms import Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise
 from scipy.ndimage import convolve
-from torchio.transforms import RandomElasticDeformation, RandomBlur
+
 from tqdm import tqdm
 
 
@@ -234,112 +226,112 @@ def standardize(img):
     img = (img / np.max(img))*255;
     return img;
 
-def cache_lesion_center_points(img):
-    if type(img) is str:
-        mri = cv2.imread(img, cv2.IMREAD_GRAYSCALE);
-    else:
-        mri = img;
-    mri_smoothed = gaussian(mri, 1);
-    mri = mri/255;
-    h,w = mri.shape;
-    mri_thresh = threshold_otsu(mri);
+# def cache_lesion_center_points(img):
+#     if type(img) is str:
+#         mri = cv2.imread(img, cv2.IMREAD_GRAYSCALE);
+#     else:
+#         mri = img;
+#     mri_smoothed = gaussian(mri, 1);
+#     mri = mri/255;
+#     h,w = mri.shape;
+#     mri_thresh = threshold_otsu(mri);
 
 
-    sobel_mag = np.sqrt(sum([sobel(mri_smoothed, axis=i)**2
-                         for i in range(mri.ndim)]) / mri.ndim)
+#     sobel_mag = np.sqrt(sum([sobel(mri_smoothed, axis=i)**2
+#                          for i in range(mri.ndim)]) / mri.ndim)
     
-    sobel_mag = ((mri>mri_thresh)*(sobel_mag<0.1)).astype("uint8");
-    pos_cords = np.array(range(sobel_mag.shape[0]*sobel_mag.shape[1])).reshape(sobel_mag.shape[0], sobel_mag.shape[1]);
+#     sobel_mag = ((mri>mri_thresh)*(sobel_mag<0.1)).astype("uint8");
+#     pos_cords = np.array(range(sobel_mag.shape[0]*sobel_mag.shape[1])).reshape(sobel_mag.shape[0], sobel_mag.shape[1]);
 
-    pos_cords = pos_cords[sobel_mag==1];
-    low = 35;
-    high = 40;
-    size = np.random.randint(low,high);
+#     pos_cords = pos_cords[sobel_mag==1];
+#     low = 35;
+#     high = 40;
+#     size = np.random.randint(low,high);
 
-    num_lesions = 10;
+#     num_lesions = 10;
     
-    pos_cords_temp = copy(pos_cords);
-    cached_lesion_center = [];
-    while(num_lesions >= 0):
-        if len(pos_cords_temp) <=0:
-            low-=1;
-            size = np.random.randint(low,size);
-            pos_cords_temp = copy(pos_cords);
-        r = np.random.randint(0, len(pos_cords_temp));
+#     pos_cords_temp = copy(pos_cords);
+#     cached_lesion_center = [];
+#     while(num_lesions >= 0):
+#         if len(pos_cords_temp) <=0:
+#             low-=1;
+#             size = np.random.randint(low,size);
+#             pos_cords_temp = copy(pos_cords);
+#         r = np.random.randint(0, len(pos_cords_temp));
         
-        point = [math.floor(pos_cords_temp[r]/h), pos_cords_temp[r]%h]
+#         point = [math.floor(pos_cords_temp[r]/h), pos_cords_temp[r]%h]
 
-        start_h = max(point[0]-size, 0);
-        end_h = min(point[0]+size, h);
+#         start_h = max(point[0]-size, 0);
+#         end_h = min(point[0]+size, h);
 
-        start_w = max(point[1]-size,0);
-        end_w = min(point[1]+size,h);
-        patch = sobel_mag[start_h:end_h, start_w:end_w];
-        s = np.sum(patch);
-        if s >= (size*2 * size*2) > 0.78:
-            cached_lesion_center.append([point[0], point[1], size]);
-            pos_cords_temp = np.delete(pos_cords_temp, r);
-            num_lesions -= 1;
-        else:
-            pos_cords_temp = np.delete(pos_cords_temp, r);
+#         start_w = max(point[1]-size,0);
+#         end_w = min(point[1]+size,h);
+#         patch = sobel_mag[start_h:end_h, start_w:end_w];
+#         s = np.sum(patch);
+#         if s >= (size*2 * size*2) > 0.78:
+#             cached_lesion_center.append([point[0], point[1], size]);
+#             pos_cords_temp = np.delete(pos_cords_temp, r);
+#             num_lesions -= 1;
+#         else:
+#             pos_cords_temp = np.delete(pos_cords_temp, r);
     
-    debug_lesion_location = False;
-    if debug_lesion_location:
-        sobel_mag = (sobel_mag*255).astype("uint8")
-        sobel_mag = cv2.cvtColor(sobel_mag, cv2.COLOR_GRAY2RGB);
-        for i in range(len(cached_lesion_center)):
-                sobel_mag_marked = deepcopy(sobel_mag);
-                sobel_mag_marked = cv2.circle(sobel_mag_marked, (int(cached_lesion_center[i][1]), int(cached_lesion_center[i][0])), cached_lesion_center[i][2], (255,255,0), -1);
-                fix,ax = plt.subplots(1,3);
-                ax[0].imshow(mri, cmap = 'gray');
-                ax[1].imshow(sobel_mag);
-                ax[2].imshow(sobel_mag_marked);
-                plt.show();
+#     debug_lesion_location = False;
+#     if debug_lesion_location:
+#         sobel_mag = (sobel_mag*255).astype("uint8")
+#         sobel_mag = cv2.cvtColor(sobel_mag, cv2.COLOR_GRAY2RGB);
+#         for i in range(len(cached_lesion_center)):
+#                 sobel_mag_marked = deepcopy(sobel_mag);
+#                 sobel_mag_marked = cv2.circle(sobel_mag_marked, (int(cached_lesion_center[i][1]), int(cached_lesion_center[i][0])), cached_lesion_center[i][2], (255,255,0), -1);
+#                 fix,ax = plt.subplots(1,3);
+#                 ax[0].imshow(mri, cmap = 'gray');
+#                 ax[1].imshow(sobel_mag);
+#                 ax[2].imshow(sobel_mag_marked);
+#                 plt.show();
 
-    return cached_lesion_center;
+#     return cached_lesion_center;
 
-def add_synthetic_lesion_2d(img, center, size):
-    if type(img) is str:
-        mri = cv2.imread(img, cv2.IMREAD_GRAYSCALE);
-    else:
-        mri = img;
+# def add_synthetic_lesion_2d(img, center, size):
+#     if type(img) is str:
+#         mri = cv2.imread(img, cv2.IMREAD_GRAYSCALE);
+#     else:
+#         mri = img;
     
-    mri = mri/255;
-    h,w = mri.shape;
+#     mri = mri/255;
+#     h,w = mri.shape;
  
-    #shape
-    ellipse = np.zeros((h,w,), dtype=np.uint8);
-    ellipse = cv2.ellipse(ellipse, center=(int(center[1]), int(center[0])), axes= (size,size), angle=0, startAngle=0, endAngle=360, color= (255,255,255), thickness= -1);
-    els = iaa.Sequential([iaa.ElasticTransformation(alpha=(80,120), sigma=(5,10))])
-    ellipse = els(images = ellipse);
-    ellipse_thresh = (ellipse>0)
-    ellipse_thresh = gaussian(ellipse_thresh, 7);
-    #================
+#     #shape
+#     ellipse = np.zeros((h,w,), dtype=np.uint8);
+#     ellipse = cv2.ellipse(ellipse, center=(int(center[1]), int(center[0])), axes= (size,size), angle=0, startAngle=0, endAngle=360, color= (255,255,255), thickness= -1);
+#     els = iaa.Sequential([iaa.ElasticTransformation(alpha=(80,120), sigma=(5,10))])
+#     ellipse = els(images = ellipse);
+#     ellipse_thresh = (ellipse>0)
+#     ellipse_thresh = gaussian(ellipse_thresh, 7);
+#     #================
 
-    downsample = np.random.randint(10,15);
+#     downsample = np.random.randint(10,15);
 
-    #noise
-    noise = np.random.normal(size=(int(h/downsample),int(w/downsample)), loc=1.0, scale=1.0);
-    noise = np.clip(noise, a_min = 0.2, a_max = 6);
-    noise = cv2.resize(noise, (h,w), interpolation=cv2.INTER_LINEAR)
-    noise = gaussian(noise, 7);
-    #================
+#     #noise
+#     noise = np.random.normal(size=(int(h/downsample),int(w/downsample)), loc=1.0, scale=1.0);
+#     noise = np.clip(noise, a_min = 0.2, a_max = 6);
+#     noise = cv2.resize(noise, (h,w), interpolation=cv2.INTER_LINEAR)
+#     noise = gaussian(noise, 7);
+#     #================
 
-    final = (ellipse_thresh)*(mri*noise);
+#     final = (ellipse_thresh)*(mri*noise);
 
-    mri_after = (1-ellipse_thresh)*mri + final;
+#     mri_after = (1-ellipse_thresh)*mri + final;
 
-    debug_output = False;
-    if debug_output is True:
-        diff = mri - mri_after;
-        fix, ax = plt.subplots(1,3);
-        ax[0].imshow(mri);
-        ax[1].imshow(diff);
-        plt.show();
+#     debug_output = False;
+#     if debug_output is True:
+#         diff = mri - mri_after;
+#         fix, ax = plt.subplots(1,3);
+#         ax[0].imshow(mri);
+#         ax[1].imshow(diff);
+#         plt.show();
     
-    mri_after = np.clip(mri_after, 0, 1);
-    mri_after = (mri_after*255).astype("uint8")
-    return mri_after, ellipse_thresh;
+#     mri_after = np.clip(mri_after, 0, 1);
+#     mri_after = (mri_after*255).astype("uint8")
+#     return mri_after, ellipse_thresh;
 
 def visualize_2d(images, slice, size=None,):
     # if size is not None:
@@ -395,118 +387,118 @@ def add_synthetic_lesion_3d(img, mask = None):
     #visualize_2d(mri_after, cube_thresh, slice=center[0:]);
     return mri_after, cube_thresh, noise, center;
 
-def inpaint_3d(img):
-    if type(img) is str:
-        mri = cv2.imread(img, cv2.IMREAD_GRAYSCALE);
-    else:
-        mri = img;
+# def inpaint_3d(img):
+#     if type(img) is str:
+#         mri = cv2.imread(img, cv2.IMREAD_GRAYSCALE);
+#     else:
+#         mri = img;
     
-    mri = mri/255;
-    mri = torch.from_numpy(mri);
-    h,w,d = mri.shape;
+#     mri = mri/255;
+#     mri = torch.from_numpy(mri);
+#     h,w,d = mri.shape;
 
-    thresh = threshold_otsu(img);
-    thresh = img > thresh;
+#     thresh = threshold_otsu(img);
+#     thresh = img > thresh;
 
-    pos_cords = np.where(thresh==1);
-    r = np.random.randint(0,len(pos_cords[0]));
-    center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
-    size = [np.random.randint(20,50), np.random.randint(20,50), np.random.randint(20,50)]
+#     pos_cords = np.where(thresh==1);
+#     r = np.random.randint(0,len(pos_cords[0]));
+#     center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+#     size = [np.random.randint(20,50), np.random.randint(20,50), np.random.randint(20,50)]
  
-    #shape
-    cube = np.zeros((1,h,w,d), dtype=np.uint8);
-    cube[:,center[0]-size[0]:center[0]+size[0], center[1]-size[1]:center[1]+size[1], center[2]-size[2]:center[2]+size[2]] = 255;
+#     #shape
+#     cube = np.zeros((1,h,w,d), dtype=np.uint8);
+#     cube[:,center[0]-size[0]:center[0]+size[0], center[1]-size[1]:center[1]+size[1], center[2]-size[2]:center[2]+size[2]] = 255;
 
-    transform = RandomElasticDeformation(
-        num_control_points=np.random.randint(20,30),
-        locked_borders=2,
-        max_displacement=np.random.randint(40,60)
-    )
+#     transform = RandomElasticDeformation(
+#         num_control_points=np.random.randint(20,30),
+#         locked_borders=2,
+#         max_displacement=np.random.randint(40,60)
+#     )
 
-    cube = transform(cube);
-    cube_thresh = (cube>0)
-    cube_thresh = GaussianSmooth(7)(cube_thresh);
-    #================
+#     cube = transform(cube);
+#     cube_thresh = (cube>0)
+#     cube_thresh = GaussianSmooth(7)(cube_thresh);
+#     #================
 
-    downsample = np.random.randint(10,15);
+#     downsample = np.random.randint(10,15);
 
-    # #noise
-    noise = np.random.normal(size=(1,int(h/downsample),int(w/downsample), int(d/downsample)), loc=2, scale=4.0);
-    noise = Resize((h,w,d))(noise);
-    noise = GaussianSmooth(7)(noise);
-    #================
+#     # #noise
+#     noise = np.random.normal(size=(1,int(h/downsample),int(w/downsample), int(d/downsample)), loc=2, scale=4.0);
+#     noise = Resize((h,w,d))(noise);
+#     noise = GaussianSmooth(7)(noise);
+#     #================
 
-    final = (cube_thresh)*(mri*noise);
+#     final = (cube_thresh)*(mri*noise);
 
-    mri_after = (1-cube_thresh)*mri + final;
+#     mri_after = (1-cube_thresh)*mri + final;
     
-    mri_after = np.clip(mri_after, 0, 1);
-    mri_after = (mri_after*255).astype("uint8")
-    #visualize_2d(mri_after, slice=center);
-    return mri_after, cube_thresh;
+#     mri_after = np.clip(mri_after, 0, 1);
+#     mri_after = (mri_after*255).astype("uint8")
+#     #visualize_2d(mri_after, slice=center);
+#     return mri_after, cube_thresh;
 
-def inpaint(img):
+# def inpaint(img):
     
-    if type(img) is str:
-        mri = cv2.imread(img, cv2.IMREAD_GRAYSCALE);
-    else:
-        mri = img;
-    mri_smoothed = gaussian(mri, 1);
-    mri = mri/255;
-    h,w = mri.shape;
-    mri_thresh = threshold_otsu(mri);
+#     if type(img) is str:
+#         mri = cv2.imread(img, cv2.IMREAD_GRAYSCALE);
+#     else:
+#         mri = img;
+#     mri_smoothed = gaussian(mri, 1);
+#     mri = mri/255;
+#     h,w = mri.shape;
+#     mri_thresh = threshold_otsu(mri);
 
 
-    sobel_mag = np.sqrt(sum([sobel(mri_smoothed, axis=i)**2
-                         for i in range(mri.ndim)]) / mri.ndim)
+#     sobel_mag = np.sqrt(sum([sobel(mri_smoothed, axis=i)**2
+#                          for i in range(mri.ndim)]) / mri.ndim)
     
-    sobel_mag = ((mri>mri_thresh)*(sobel_mag<0.1)).astype("uint8");
-    edges = np.sqrt(sum([sobel(sobel_mag, axis=i)**2
-                         for i in range(mri.ndim)]) / mri.ndim)
-    edges = edges > threshold_otsu(edges);
-    pos_cords = np.array(range(edges.shape[0]*edges.shape[1])).reshape(edges.shape[0], edges.shape[1]);
+#     sobel_mag = ((mri>mri_thresh)*(sobel_mag<0.1)).astype("uint8");
+#     edges = np.sqrt(sum([sobel(sobel_mag, axis=i)**2
+#                          for i in range(mri.ndim)]) / mri.ndim)
+#     edges = edges > threshold_otsu(edges);
+#     pos_cords = np.array(range(edges.shape[0]*edges.shape[1])).reshape(edges.shape[0], edges.shape[1]);
 
-    pos_cords = pos_cords[edges==1];
-    r = np.random.randint(0, len(pos_cords));
+#     pos_cords = pos_cords[edges==1];
+#     r = np.random.randint(0, len(pos_cords));
 
-    top_left = [math.floor(pos_cords[r]/h), pos_cords[r]%h];
+#     top_left = [math.floor(pos_cords[r]/h), pos_cords[r]%h];
 
-    mri_smoothed = gaussian(mri, 21);
+#     mri_smoothed = gaussian(mri, 21);
  
-    #shape
-    rh = np.random.randint(100,150);
-    rw = np.random.randint(100,150);
-    rectangle = np.zeros((h,w,), dtype=np.uint8);
-    rectangle = cv2.rectangle(rectangle, pt1=(top_left[1],top_left[0]), pt2=(top_left[1]+rh ,top_left[0]+rw), color= (255,255,255), thickness= -1);
-    edges = cv2.rectangle((edges*255).astype("uint8"), pt1=(top_left[1],top_left[0]), pt2=(top_left[1]+rh ,top_left[0]+rw), color= (255,255,255), thickness= -1);
-    rectangle_thresh = (rectangle>0)
-    rectangle_thresh = gaussian(rectangle, 7);
-    #================
+#     #shape
+#     rh = np.random.randint(100,150);
+#     rw = np.random.randint(100,150);
+#     rectangle = np.zeros((h,w,), dtype=np.uint8);
+#     rectangle = cv2.rectangle(rectangle, pt1=(top_left[1],top_left[0]), pt2=(top_left[1]+rh ,top_left[0]+rw), color= (255,255,255), thickness= -1);
+#     edges = cv2.rectangle((edges*255).astype("uint8"), pt1=(top_left[1],top_left[0]), pt2=(top_left[1]+rh ,top_left[0]+rw), color= (255,255,255), thickness= -1);
+#     rectangle_thresh = (rectangle>0)
+#     rectangle_thresh = gaussian(rectangle, 7);
+#     #================
 
 
-    final = (rectangle_thresh)*(mri_smoothed);
+#     final = (rectangle_thresh)*(mri_smoothed);
 
-    mri_after = (1-rectangle_thresh)*mri + final;
+#     mri_after = (1-rectangle_thresh)*mri + final;
 
-    debug_output = True;
-    if debug_output is True:
-        fix, ax = plt.subplots(1,3);
-        ax[0].imshow(mri, cmap='gray');
-        ax[2].imshow(mri_after, cmap='gray');
-        ax[1].imshow(edges, cmap='gray');
-        plt.show();
+#     debug_output = True;
+#     if debug_output is True:
+#         fix, ax = plt.subplots(1,3);
+#         ax[0].imshow(mri, cmap='gray');
+#         ax[2].imshow(mri_after, cmap='gray');
+#         ax[1].imshow(edges, cmap='gray');
+#         plt.show();
     
-    mri_after = np.clip(mri_after, 0, 1);
-    mri_after = (mri_after*255).astype("uint8")
-    return mri_after;
+#     mri_after = np.clip(mri_after, 0, 1);
+#     mri_after = (mri_after*255).astype("uint8")
+#     return mri_after;
 
-def cache_lesion_locations():
-    all_imgs = glob('dataset/*.png');
-    for img_path in all_imgs:
-        file_name = os.path.basename(img_path);
-        file_name = file_name[:file_name.rfind('.')];
-        ret = cache_lesion_center_points(img_path);
-        pickle.dump(ret, open(f'dataset/{file_name}.dmp', 'wb'));
+# def cache_lesion_locations():
+#     all_imgs = glob('dataset/*.png');
+#     for img_path in all_imgs:
+#         file_name = os.path.basename(img_path);
+#         file_name = file_name[:file_name.rfind('.')];
+#         ret = cache_lesion_center_points(img_path);
+#         pickle.dump(ret, open(f'dataset/{file_name}.dmp', 'wb'));
 
 def cache_mri_gradients():
     all_mri = glob(os.path.join('mri_data', '*.nii.gz'));

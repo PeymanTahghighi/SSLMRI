@@ -498,9 +498,9 @@ if __name__ == "__main__":
     # image = reader.Execute()
     # sitk.WriteImage(image, f'test.nii.gz')
 
-    model = ResUnet3D();
+    model = ResUnet3D()
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load('best_model_3d_2.ckpt');
+    ckpt = torch.load('best_model_1.ckpt');
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 

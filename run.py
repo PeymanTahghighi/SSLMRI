@@ -134,7 +134,7 @@ if __name__ == "__main__":
     
     #cache_mri_gradients();
 
-    RESUME = True;
+    RESUME = False;
     model = UNet3D(
             spatial_dims=3,
             in_channels=1,

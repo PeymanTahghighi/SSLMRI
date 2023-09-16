@@ -1,14 +1,12 @@
 #===============================================================
 #===============================================================
 from copy import deepcopy
-from shutil import copy
 import torch
 import torch.nn as nn
 from torchvision import models
 import torch.nn.functional as F
 import config
 from resnet import resnet50
-from unet import UNet
 from monai.networks.blocks.convolutions import Convolution, ResidualUnit
 from monai.networks.layers.factories import Act
 from typing import Optional, Sequence, Tuple, Union
