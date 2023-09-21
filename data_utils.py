@@ -1,5 +1,4 @@
 import os
-import cv2
 from torch.utils.data import DataLoader, Dataset
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
@@ -11,14 +10,14 @@ import matplotlib.pyplot as plt
 from torchvision import transforms
 import torch
 import config
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
 import nibabel as nib
 from skimage.filters import gaussian, sobel, threshold_otsu, try_all_threshold
 from monai.transforms import Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise
 from scipy.ndimage import convolve
-
+import shutil
 from tqdm import tqdm
-
+import math
 
 def window_center_adjustment(img):
 
@@ -33,58 +32,23 @@ def window_center_adjustment(img):
 
     return adjusted_img;
 
-def cache_test_dataset(num_data, test_mri):
-    if os.path.exists('cache') is False:
-        os.makedirs('cache');
+def cache_test_dataset(num_data, test_mri, fold):
+    if os.path.exists(f'cache/{fold}') is False:
+        os.makedirs(f'cache/{fold}');
     
     mri_dataset_test = MRI_Dataset_3D(test_mri,cache=True);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
 
-    num_data = num_data//len(test_loader);
+    num_data = math.ceil(num_data/len(test_loader));
     counter = 0;
+    ret = [];
     for n in range(num_data):
         for (batch) in test_loader:
-            pickle.dump([b.squeeze() for b in batch], open(os.path.join('cache', f'{counter}.tstd'), 'wb'));
+            ret.append(os.path.join('cache',f'{fold}', f'{counter}.tstd'))
+            pickle.dump([b.squeeze() for b in batch], open(os.path.join('cache',f'{fold}', f'{counter}.tstd'), 'wb'));
             counter += 1;
 
-class MRI_Dataset_2D(Dataset):
-    def __init__(self, mr_images) -> None:
-        super().__init__();
-        self.mr_images = mr_images;
-        self.augment_noisy_image = A.Compose([
-            A.MotionBlur(blur_limit = 14, p=1.0), 
-            A.GaussianBlur(blur_limit = (7,11), p=1.0), A.GaussNoise(p=1.0)
-            ])
-        self.transforms = A.Compose([A.Normalize(0.5, 0.5)]);
-    def __len__(self):
-        return len(self.mr_images);
-    def __getitem__(self, index):
-        mrimage = cv2.imread(self.mr_images[index], cv2.IMREAD_GRAYSCALE);
-        file_name = os.path.basename(self.mr_images[index]);
-        file_name = file_name[:file_name.rfind('.')];
-        lesion_centers = np.array(pickle.load(open(f'dataset\\{file_name}.dmp', 'rb')));
-        mask = mrimage > threshold_otsu(mrimage);
-        mriimage_augmented = self.augment_noisy_image(image = mrimage)['image'];
-        mrimage_copy = copy(mrimage);
-        mrimage_noisy = copy(mriimage_augmented);
-        total_heatmap = np.zeros_like(mrimage_copy, dtype=np.float64);
-        for i in range(5):
-            r = np.random.randint(0, len(lesion_centers));
-            mrimage_noisy, heatmap = add_synthetic_lesion_2d(mrimage_noisy, (lesion_centers[r][1], lesion_centers[r][0]), lesion_centers[r][2])
-            total_heatmap += heatmap;
-            lesion_centers = np.delete(lesion_centers, r, axis=0);
-        
-        total_heatmap = np.where(total_heatmap > 0, 0.0, 1.0);
-        debug_data = True;
-        if debug_data:
-            fig, ax = plt.subplots(1,2);
-            ax[0].imshow(mrimage_copy, cmap='gray');
-            ax[1].imshow(mrimage_noisy, cmap='gray');
-            plt.show();
-        
-        mrimage = self.transforms(image = mrimage)['image'];
-        mrimage_noisy = self.transforms(image = mrimage_noisy)['image'];
-        return mrimage, mrimage_noisy, mask, total_heatmap;
+    return ret;
 
 class MRI_Dataset_3D(Dataset):
     def __init__(self, mr_images, train = True, cache = False) -> None:
@@ -102,10 +66,10 @@ class MRI_Dataset_3D(Dataset):
         self.crop = RandCropByPosNegLabeld(
             keys=['image', 'gradient', 'mask'], 
             label_key='gradient', 
-            spatial_size= (config.CROP_SIZE_W,config.CROP_SIZE_H,config.CROP_SIZE_D),
+            spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
             pos=1, 
             neg=0,
-            num_samples=1 if cache else config.SAMPLES_PER_MRI if train else 1);
+            num_samples=1 if cache else config.hyperparameters['sample_per_mri'] if train else 1);
 
         self.train = train;
         self.cache = cache;
@@ -152,8 +116,8 @@ class MRI_Dataset_3D(Dataset):
             ret_mask = None;
             ret_total_heatmap = None;
 
-            for i in range(config.SAMPLES_PER_MRI if self.cache is False else 1):
-                if config.DETERMINISTIC is False:
+            for i in range(config.hyperparameters['sample_per_mri'] if self.cache is False else 1):
+                if config.hyperparameters['deterministic'] is False:
                     ret_transforms = self.crop({'image': mrimage,'gradient': g, 'mask': mask});
                     mrimage_c = ret_transforms[i]['image'];
                     g_c = ret_transforms[i]['gradient'];
@@ -172,7 +136,7 @@ class MRI_Dataset_3D(Dataset):
                 total_heatmap = torch.zeros_like(mrimage_noisy, dtype=torch.float64);
 
 
-                num_corrupted_patches = np.random.randint(1,5) if config.DETERMINISTIC is False else 3;
+                num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
                 for i in range(num_corrupted_patches):
                     mrimage_noisy, heatmap, noise, center = add_synthetic_lesion_3d(mrimage_noisy, g_c)
                     total_heatmap += heatmap;
@@ -181,7 +145,7 @@ class MRI_Dataset_3D(Dataset):
                 #r = np.random.randint(0,len(pos_cords[0]));
                 #center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
                 total_heatmap_thresh = torch.where(total_heatmap > 0.9, 0.0, 1.0);
-                if config.DETERMINISTIC is True:
+                if config.hyperparameters['deterministic'] is True:
                     mrimage_noisy = GibbsNoise(alpha = 0.65)(mrimage_noisy);
                 else:
                     mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
@@ -207,17 +171,40 @@ class MRI_Dataset_3D(Dataset):
             ret = self.mr_images[index];
             return ret;
 
-def get_loader(cache_test = False, num_test_data = 100):
+def update_folds(num_test_data = 200):
+    if os.path.exists('cache') is False:
+        os.makedirs('cache');
+
     mri_files = glob(os.path.join('mri_data','*.nii.gz'));
-    train_mri, test_mri = mri_files[:6], mri_files[6:];
+    patient_mri = dict();
+    for mri_path in mri_files:
+        patient_name = mri_path[:mri_path.find('-')];
+        if patient_name not in patient_mri:
+            patient_mri[patient_name] = [mri_path];
+        else:
+            patient_mri[patient_name].append(mri_path);
+
+    kfold = KFold(5, random_state=42, shuffle=True);
+    patient_list = list(patient_mri.keys());
+    f = 0;
+    for train_idx, test_idx in kfold.split(patient_list):
+        train_mri = [patient_mri[patient_list[t]] for t in train_idx];
+        train_mri = [item for pn in train_mri for item in pn];
+        test_mri = [patient_mri[patient_list[t]] for t in test_idx];
+        test_mri = [item for pn in test_mri for item in pn];
+        test_mri = cache_test_dataset(num_test_data, test_mri, f);
+        pickle.dump([train_mri, test_mri], open(f'cache/{f}.fold', 'wb'));
+        f+=1;
+
+def get_loader(fold):
+    
+    train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
 
     mri_dataset_train = MRI_Dataset_3D(train_mri);
-    train_loader = DataLoader(mri_dataset_train, 1, False, num_workers=0, pin_memory=True);
-    if cache_test is True:
-        cache_test_dataset(num_test_data, test_mri);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=4, pin_memory=True);
     test_mri = glob(os.path.join('cache','*.tstd'));
     mri_dataset_test = MRI_Dataset_3D(test_mri, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=4, pin_memory=True);
 
     return train_loader, test_loader;   
 
@@ -347,15 +334,13 @@ def visualize_2d(images, slice, size=None,):
     plt.show();
 
 def add_synthetic_lesion_3d(img, mask = None):
-    if type(img) is str:
-        mri = cv2.imread(img, cv2.IMREAD_GRAYSCALE);
-    else:
-        mri = img;
+    
+    mri = img;
 
     _,h,w,d = mri.shape;
 
     mask_cpy = deepcopy(mask);
-    size = np.random.randint(10,20) if config.DETERMINISTIC is False else 15;
+    size = np.random.randint(10,20) if config.hyperparameters['deterministic'] is False else 15;
     mask_cpy[:,:,:,d-size:] = 0;
     mask_cpy[:,:,:,:size+1] = 0;
     mask_cpy[:,:,w-size:,:] = 0;
@@ -526,64 +511,3 @@ def gradient(mri):
     img3 = convolve(mri, kernel3)
     ret = np.sqrt(img1**2 + img2**2 + img3**2);
     return ret;
-
-if __name__ == "__main__":
-    img = cv2.imread('samples\\TUM10-20171018_290.png_synthetic.png', cv2.IMREAD_GRAYSCALE);
-    mask = np.zeros_like(img);
-    mask[187:350, 195:331] = 255;
-    dst = cv2.inpaint(img,mask,3,cv2.INPAINT_TELEA)
-    cv2.imshow('dst',dst)
-    cv2.waitKey(0)
-
-    #inpaint('dataset\\TUM20-20180402_329.png');
-
-    
-    fixed_image_nib = nib.load('mri_data/TUM10-20170316.nii.gz')
-    fixed_image_data = fixed_image_nib.get_fdata()
-    fixed_image_data = window_center_adjustment(fixed_image_data);
-
-    #visualize_2d(thresh, [256,256,70]);
-    fixed_image_data = np.expand_dims(fixed_image_data, axis=0);
-    fixed_image_data = fixed_image_data / 255;
-    ret,_ = add_synthetic_lesion_3d(fixed_image_data);
-    new_image = nib.Nifti1Image(ret[0].squeeze(), affine=np.eye(4))
-    nib.save(new_image, 'test.nii.gz');
-
-    #thresh = threshold_otsu(fixed_image_data);
-    #fixed_image_data = fixed_image_data > thresh;
-
-    # r = 10;
-    # img = np.zeros((256,256,256), dtype=np.uint8);
-    # center = 125;
-    # img[center-r:center+r, center-r:center+r, center-r:center+r] = 255;
-    
-    
-    # els = Rand2DElastic(
-    # prob=1.0,
-    # spacing=(20, 20),
-    # magnitude_range=(5, 10),
-    # rotate_range=(np.pi / 4,),
-    # scale_range=(0.2, 0.2),
-    # padding_mode="zeros",
-    # )
-    #img = np.expand_dims(img, axis  = 0)
-    #img = els(img);
-    #img = img.permute(1,2,0).numpy();
-
-    
-
-    
-        #cv2.imwrite(f'samples\\{file_name}_synthetic.png', ret);
-        #shutil.copy(img_path, f'samples\\{file_name}_orig.png')
-
-    # orig = cv2.imread('dataset\\TUM10-20170316_119.png', cv2.IMREAD_GRAYSCALE);
-    # orig = orig/255;
-    # ret = add_synthetic_lesion('dataset\\TUM10-20170316_164.png');
-    # #ret = window_center_adjustment(ret*255);
-    # fix, ax = plt.subplots(1,3);
-    # diff = ret - orig;
-    # ax[0].imshow(ret, cmap='gray');
-    # ax[1].imshow(orig, cmap='gray');
-    # ax[2].imshow(diff);
-    # plt.show();
-    

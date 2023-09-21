@@ -1,4 +1,4 @@
-from data_utils import cache_mri_gradients, get_loader, cache_test_dataset
+from data_utils import cache_mri_gradients, get_loader, cache_test_dataset, update_folds
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
@@ -20,25 +20,27 @@ def train(model, train_loader, optimizer, scalar):
     epoch_loss = [];
     for batch_idx, (batch) in pbar:
         mri, mri_noisy, mask, heatmap = batch[0].to('cuda').unsqueeze(dim=2).squeeze(dim=0), batch[1].to('cuda').unsqueeze(dim=2).squeeze(dim=0), batch[2].to('cuda').squeeze(dim=0), batch[3].to('cuda').squeeze(dim=0);
-        steps = config.SAMPLES_PER_MRI // config.BATCH_SIZE;
+        steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
         for s in range(steps):
-            curr_mri = mri[s*config.BATCH_SIZE:(s+1)*config.BATCH_SIZE]
-            curr_mri_noisy = mri_noisy[s*config.BATCH_SIZE:(s+1)*config.BATCH_SIZE]
-            curr_mask = mask[s*config.BATCH_SIZE:(s+1)*config.BATCH_SIZE]
-            curr_heatmap = heatmap[s*config.BATCH_SIZE:(s+1)*config.BATCH_SIZE]
+            curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_mask = mask[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             with torch.cuda.amp.autocast_mode.autocast():
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
+                hm1 = hm1 * 2.0
+                hm2 = hm2 * 2.0
                 lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
                 lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
                 lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
                 lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
                 lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
-                total_loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.VIRTUAL_BATCH_SIZE;
+                total_loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
             scalar.scale(total_loss).backward();
             epoch_loss.append(total_loss.item());
 
-            if ((batch_idx+1) % config.VIRTUAL_BATCH_SIZE == 0 or (batch_idx+1) == len(train_loader)):
+            if ((batch_idx+1) % config.hyperparameters['virtual_batch_size'] == 0 or (batch_idx+1) == len(train_loader)):
                 scalar.step(optimizer);
                 scalar.update();
                 model.zero_grad(set_to_none = True);
@@ -57,6 +59,8 @@ def valid(model, loader):
             mri, mri_noisy, mask, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda'), batch[3].to('cuda').unsqueeze(dim=1); 
             hm1 = model(mri, mri_noisy);
             hm2 = model(mri_noisy, mri);
+            hm1 = hm1 * 2.0
+            hm2 = hm2 * 2.0
             lih1 = F.l1_loss((mri+hm1), mri_noisy);
             lih2 = F.l1_loss((mri_noisy+hm2), mri);
             lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
@@ -117,7 +121,7 @@ def save_examples(model, loader,):
                 ax[2][3].imshow(mri_recon[0,0,pos_cords[1][r], :, :], cmap='gray');
                 ax[2][4].imshow(mri_recon[0,0,:,pos_cords[2][r], :], cmap='gray');
                 ax[2][5].imshow(mri_recon[0,0, :, :,pos_cords[3][r]], cmap='gray');
-                fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.BATCH_SIZE}_{j}.png'));
+                fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
                 plt.close("all");
 
             counter += 1;
@@ -132,6 +136,7 @@ def log_gradients_in_model(model, logger, step):
 
 if __name__ == "__main__":
     
+    update_folds();
     #cache_mri_gradients();
 
     RESUME = False;
@@ -143,13 +148,14 @@ if __name__ == "__main__":
             strides=(2, 2, 2),
             num_res_units=2,
             );
+    
     if RESUME is True:
         ckpt = torch.load('resume.ckpt');
         model.load_state_dict(ckpt['model']);
 
     model.to('cuda');
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
-    optimizer = optim.Adam(model.parameters(), lr = config.LEARNING_RATE);
+    optimizer = optim.Adam(model.parameters(), lr = config.hyperparameters['learning_rate']);
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=500, eta_min= 1e-4);
     summary_writer = SummaryWriter(os.path.join('exp', 'Unet3D-CosineLR-5e-3'));
     best_loss = 100;
@@ -157,13 +163,14 @@ if __name__ == "__main__":
 
     if RESUME is True:
         optimizer.load_state_dict(ckpt['optimizer']);
+        lr_scheduler.load_state_dict(ckpt['scheduler']);
         best_loss = ckpt['best_loss'];
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_loader = get_loader(False, 200);
+    train_loader, test_loader = get_loader(0);
     sample_output_interval = 10;
-    for epoch in range(start_epoch, 5000):
+    for epoch in range(start_epoch, 1000):
         model.train();
         train_loss = train(model, train_loader, optimizer, scalar); 
         model.eval();
@@ -186,7 +193,9 @@ if __name__ == "__main__":
         if best_loss > valid_loss:
             print(f'new best model found: {valid_loss}')
             best_loss = valid_loss;
-            torch.save({'model': model.state_dict(), 'best_loss': best_loss},'best_model.ckpt');
+            torch.save({'model': model.state_dict(), 
+                        'best_loss': best_loss,
+                        'hp': config.hyperparameters},'best_model.ckpt');
 
 
 

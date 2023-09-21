@@ -14,6 +14,7 @@ import warnings
 #===============================================================
 #===============================================================
 
+
 class UpLayer(nn.Module):
         def __init__(self,
                     in_channels: int, 
@@ -510,83 +511,6 @@ class UNet3D(nn.Module):
         out = self.final(up);
 
         return out;
-
-# class Unet3D(nn.Module):
-#     def __init__(self) -> None:
-#         super().__init__();
-#         self.unet = UNet(
-#             spatial_dims=3,
-#             in_channels=1,
-#             out_channels=3,
-#             channels=(128, 256, 512, 1024, 2048),
-#             strides=(2, 2, 2, 2),
-#             num_res_units=2,
-#         )
-        
-#         self.feature_selection_modules = nn.ModuleList();
-#         self.feature_refinement_modules = nn.ModuleList();
-#         self.feature_attention_modules = nn.ModuleList();
-
-#         feats = [2048,1024,512,256,64,64];
-#         for f in feats:
-#             layers = self._make_squeeze_excitation(f);
-#             self.feature_selection_modules.append(layers[0]);
-#             self.feature_refinement_modules.append(layers[1]);
-#             self.feature_attention_modules.append(layers[2]);
-
-#         self.final = nn.Sequential(
-#             ConvBlock(64,1,1,1),
-#             nn.Tanh()
-#         )
-
-
-#         self.__initial_weights = deepcopy(self.state_dict());
-    
-#     def _make_squeeze_excitation(self, feature_size):
-#         feature_selection = nn.Sequential(
-#             ConvBlock(feature_size*2, feature_size, 1, 1),
-#         )
-#         refinement = nn.Sequential(
-#             ConvBlock(feature_size, feature_size, 3, 1),
-#             ConvBlock(feature_size, feature_size, 3, 1),
-#         )
-#         atten = nn.Sequential(
-#             nn.AdaptiveAvgPool3d(1),
-#             nn.Sigmoid()
-#         )
-
-#         return feature_selection, refinement, atten;
-
-
-#     def squeeze_excitation_block(self, inp1, inp2, idx):
-#         d = torch.concat([inp1, inp2], dim=1);
-#         d_selection = self.feature_selection_modules[idx](d);
-#         d_refine = self.feature_refinement_modules[idx](d_selection);
-#         d_attn = self.feature_attention_modules[idx](d_refine);
-#         d_refine = d_refine * d_attn;
-#         return F.leaky_relu(d_refine + d_selection, 0.2, inplace=True);
-
-#     def forward(self, inp1, inp2):
-        
-#         inp1_d5, inp1_d4, inp1_d3, inp1_d2, inp1_d1, inp_feat_1 = self.unet(inp1);
-#         inp2_d5, inp2_d4, inp2_d3, inp2_d2, inp2_d1, inp_feat_2 = self.unet(inp2);
-
-#         d_5 = self.squeeze_excitation_block(inp1_d5, inp2_d5, 0);
-#         d_4 = self.squeeze_excitation_block(inp1_d4, inp2_d4, 1);
-#         d_3 = self.squeeze_excitation_block(inp1_d3, inp2_d3, 2);
-#         d_2 = self.squeeze_excitation_block(inp1_d2, inp2_d2, 3);
-#         d_1 = self.squeeze_excitation_block(inp1_d1, inp2_d1, 4);
-#         inp_feat = self.squeeze_excitation_block(inp_feat_1, inp_feat_2, 5);
-    
-#         u_1 = self.up_1(d_5, d_4);
-#         u_2 = self.up_2(u_1, d_3);
-#         u_3 = self.up_3(u_2, d_2);
-#         u_4 = self.up_4(u_3, d_1);
-#         u_5 = self.up_5(u_4, inp_feat);
-
-#         out = self.final(u_5);
-
-#         return out;
 
 class AttenUnet3D(nn.Module):
     def __init__(self) -> None:

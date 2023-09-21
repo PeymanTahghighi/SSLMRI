@@ -1,13 +1,12 @@
 import torch
-BATCH_SIZE = 1;
-CROP_SIZE_W = 64;
-CROP_SIZE_H = 128;
-CROP_SIZE_D = 128;
-TEMPERATURE = 0.5;
-EXP_NAME = '1';
-NUM_NEGATIVES = 10;
-LEARNING_RATE = 0.001
-VIRTUAL_BATCH_SIZE = 2;
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu';
-SAMPLES_PER_MRI = 8;
-DETERMINISTIC = False;
+hyperparameters = {
+    'batch_size' : 2,
+    'crop_size_w': 64,
+    'crop_size_h': 128,
+    'crop_size_d':128,
+    'learning_rate':1e-4,
+    'sample_per_mri':4,
+    'deterministic':False,
+    'virtual_batch_size':1
+}
