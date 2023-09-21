@@ -134,7 +134,7 @@ def log_gradients_in_model(model, logger, step):
 
 if __name__ == "__main__":
     
-    update_folds();
+    #update_folds();
     #cache_mri_gradients();
 
     RESUME = False;
