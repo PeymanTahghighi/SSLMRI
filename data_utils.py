@@ -75,7 +75,7 @@ class MRI_Dataset_3D(Dataset):
 
         if train or cache:
             for mr in mr_images:
-                file_name = os.path.basename(mr);
+                file_name = mr[mr.rfind('\\')+1:];
                 file_name = file_name[:file_name.find('.')];
                 g = pickle.load(open(os.path.join('mri_data', f'{file_name}.gradient'), 'rb'));
                 g = np.expand_dims(g, axis=0);
