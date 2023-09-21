@@ -1,13 +1,11 @@
 import os
 from torch.utils.data import DataLoader, Dataset
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
 import pickle
 from glob import glob
 import numpy as np
 from copy import deepcopy, copy
 import matplotlib.pyplot as plt
-from torchvision import transforms
+
 import torch
 import config
 from sklearn.model_selection import train_test_split, KFold
@@ -15,7 +13,6 @@ import nibabel as nib
 from skimage.filters import gaussian, sobel, threshold_otsu, try_all_threshold
 from monai.transforms import Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise
 from scipy.ndimage import convolve
-import shutil
 from tqdm import tqdm
 import math
 

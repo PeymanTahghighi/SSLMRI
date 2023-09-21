@@ -1,6 +1,5 @@
 from data_utils import cache_mri_gradients, get_loader, cache_test_dataset, update_folds
 import matplotlib.pyplot as plt
-import cv2
 import numpy as np
 from tqdm import tqdm
 import torch.optim as optim
@@ -9,7 +8,6 @@ import config
 import torch.nn.functional as F
 from model_3d import UNet3D
 from torch.utils.tensorboard import SummaryWriter
-import torch.nn as nn
 import os
 from torchvision.utils import save_image, make_grid
 from torch.optim.lr_scheduler import CosineAnnealingLR
