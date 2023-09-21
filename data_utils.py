@@ -80,7 +80,7 @@ class MRI_Dataset_3D(Dataset):
                 g = pickle.load(open(os.path.join('mri_data', f'{file_name}.gradient'), 'rb'));
                 g = np.expand_dims(g, axis=0);
 
-                mrimage = nib.load(mr)
+                mrimage = nib.load(mr.replace('\\','/'))
                 mrimage = nib.as_closest_canonical(mrimage);
                 mrimage = mrimage.get_fdata()
                 mrimage = window_center_adjustment(mrimage);
