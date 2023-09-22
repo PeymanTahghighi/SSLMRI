@@ -199,7 +199,7 @@ def get_loader(fold):
 
     mri_dataset_train = MRI_Dataset_3D(train_mri);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=4, pin_memory=True);
-    test_mri = glob(os.path.join('cache','*.tstd'));
+    test_mri = glob(os.path.join('cache',f'{fold}','*.tstd'));
     mri_dataset_test = MRI_Dataset_3D(test_mri, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=4, pin_memory=True);
 
