@@ -346,8 +346,8 @@ def add_synthetic_lesion_3d(img, mask_g):
     mask_cpy[:,:,:size_y+1,:] = 0;
     mask_cpy[:,h-size_x:,:,:] = 0;
     mask_cpy[:,:size_x+1,:,:] = 0;
+    pos_cords = np.where(mask_cpy==1);
     if len(pos_cords) != 0:
-        pos_cords = np.where(mask_cpy==1);
         r = np.random.randint(0,len(pos_cords[0]));
         center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
     else:
