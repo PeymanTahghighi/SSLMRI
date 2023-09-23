@@ -197,10 +197,10 @@ def get_loader(fold):
     
     train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
 
-    mri_dataset_train = MRI_Dataset_3D(train_mri);
+    mri_dataset_train = MRI_Dataset_3D(train_mri[:5]);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
     test_mri = glob(os.path.join('cache',f'{fold}','*.tstd'));
-    mri_dataset_test = MRI_Dataset_3D(test_mri, train=False);
+    mri_dataset_test = MRI_Dataset_3D(test_mri[:5], train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=8, pin_memory=True);
 
     return train_loader, test_loader;   
@@ -330,27 +330,33 @@ def visualize_2d(images, slice, size=None,):
         ax[i][2].imshow(img[:,:,slice[2]], cmap='gray');
     plt.show();
 
-def add_synthetic_lesion_3d(img, mask = None):
+def add_synthetic_lesion_3d(img, mask_g):
     
     mri = img;
 
     _,h,w,d = mri.shape;
 
-    mask_cpy = deepcopy(mask);
-    size = np.random.randint(15,25) if config.hyperparameters['deterministic'] is False else 15;
-    mask_cpy[:,:,:,d-size:] = 0;
-    mask_cpy[:,:,:,:size+1] = 0;
-    mask_cpy[:,:,w-size:,:] = 0;
-    mask_cpy[:,:,:size+1,:] = 0;
-    mask_cpy[:,h-size:,:,:] = 0;
-    mask_cpy[:,:size+1,:,:] = 0;
-    pos_cords = np.where(mask_cpy==1);
-    r = np.random.randint(0,len(pos_cords[0]));
-    center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+    mask_cpy = deepcopy(mask_g);
+    size_x = np.random.randint(10,20) if config.hyperparameters['deterministic'] is False else 15;
+    size_y = np.random.randint(10,30) if config.hyperparameters['deterministic'] is False else 15;
+    size_z = np.random.randint(10,30) if config.hyperparameters['deterministic'] is False else 15;
+    mask_cpy[:,:,:,d-size_z:] = 0;
+    mask_cpy[:,:,:,:size_z+1] = 0;
+    mask_cpy[:,:,w-size_y:,:] = 0;
+    mask_cpy[:,:,:size_y+1,:] = 0;
+    mask_cpy[:,h-size_x:,:,:] = 0;
+    mask_cpy[:,:size_x+1,:,:] = 0;
+    if len(pos_cords) != 0:
+        pos_cords = np.where(mask_cpy==1);
+        r = np.random.randint(0,len(pos_cords[0]));
+        center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+    else:
+        center = [img.shape[0]//2, img.shape[1]//2, img.shape[2]/2]
+    
  
     #shape
     cube = np.zeros((1,h,w,d), dtype=np.uint8);
-    cube[:,max(center[0]-size,0):min(center[0]+size, h), max(center[1]-size,0):min(center[1]+size,w), max(center[2]-size,0):min(center[2]+size,d)] = 1;
+    cube[:,max(center[0]-size_x,0):min(center[0]+size_x, h), max(center[1]-size_y,0):min(center[1]+size_y,w), max(center[2]-size_z,0):min(center[2]+size_z,d)] = 1;
 
     #cube = transform(cube);
     cube_thresh = (cube>0)
@@ -361,7 +367,7 @@ def add_synthetic_lesion_3d(img, mask = None):
 
     noise = GaussianSmooth(7)(mri);
     final = (cube_thresh)*(noise);
-    noise = GaussianSmooth(7)(mask.float());
+    noise = GaussianSmooth(7)(mask_g.float());
     mri_after = (1-cube_thresh)*mri + final;
     
     mri_after = torch.clip(mri_after, 0, 1);
