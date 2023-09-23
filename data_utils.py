@@ -19,7 +19,7 @@ import math
 def window_center_adjustment(img):
 
     hist = np.histogram(img.ravel(), bins = int(np.max(img)))[0];
-    hist = hist / hist.sum();
+    hist = hist / (hist.sum()+1e-4);
     hist = np.cumsum(hist);
 
     hist_thresh = ((1-hist) < 5e-4);
@@ -62,7 +62,7 @@ class MRI_Dataset_3D(Dataset):
         self.transforms = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
         self.crop = RandCropByPosNegLabeld(
             keys=['image', 'gradient', 'mask'], 
-            label_key='gradient', 
+            label_key='mask', 
             spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
             pos=1, 
             neg=0,
@@ -105,7 +105,7 @@ class MRI_Dataset_3D(Dataset):
             
             mask = np.expand_dims(mask, axis=0);
             mrimage = np.expand_dims(mrimage, axis=0);
-            mrimage = mrimage / np.max(mrimage);
+            mrimage = mrimage / (np.max(mrimage)+1e-4);
             
 
             ret_mrimage = None;
@@ -197,10 +197,10 @@ def get_loader(fold):
     
     train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
 
-    mri_dataset_train = MRI_Dataset_3D(train_mri);
+    mri_dataset_train = MRI_Dataset_3D(train_mri[:5]);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
     test_mri = glob(os.path.join('cache',f'{fold}','*.tstd'));
-    mri_dataset_test = MRI_Dataset_3D(test_mri, train=False);
+    mri_dataset_test = MRI_Dataset_3D(test_mri[:5], train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=8, pin_memory=True);
 
     return train_loader, test_loader;   
@@ -337,7 +337,7 @@ def add_synthetic_lesion_3d(img, mask = None):
     _,h,w,d = mri.shape;
 
     mask_cpy = deepcopy(mask);
-    size = np.random.randint(10,20) if config.hyperparameters['deterministic'] is False else 15;
+    size = np.random.randint(15,25) if config.hyperparameters['deterministic'] is False else 15;
     mask_cpy[:,:,:,d-size:] = 0;
     mask_cpy[:,:,:,:size+1] = 0;
     mask_cpy[:,:,w-size:,:] = 0;
@@ -356,7 +356,7 @@ def add_synthetic_lesion_3d(img, mask = None):
     cube_thresh = (cube>0)
 
     cube_thresh = GaussianSmooth(7, approx='erf')(cube_thresh);
-    cube_thresh = cube_thresh / torch.max(cube_thresh);
+    cube_thresh = cube_thresh / (torch.max(cube_thresh) + 1e-4);
     #================
 
     noise = GaussianSmooth(7)(mri);
