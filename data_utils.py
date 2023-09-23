@@ -197,10 +197,10 @@ def get_loader(fold):
     
     train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
 
-    mri_dataset_train = MRI_Dataset_3D(train_mri[:5]);
+    mri_dataset_train = MRI_Dataset_3D(train_mri);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
     test_mri = glob(os.path.join('cache',f'{fold}','*.tstd'));
-    mri_dataset_test = MRI_Dataset_3D(test_mri[:5], train=False);
+    mri_dataset_test = MRI_Dataset_3D(test_mri, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=8, pin_memory=True);
 
     return train_loader, test_loader;   
