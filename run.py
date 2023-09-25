@@ -156,7 +156,7 @@ if __name__ == "__main__":
     model.to('cuda');
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
     optimizer = optim.Adam(model.parameters(), lr = config.hyperparameters['learning_rate']);
-    lr_scheduler = CosineAnnealingLR(optimizer, T_max=500, eta_min= 1e-4);
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=500, eta_min= 1e-6);
     summary_writer = SummaryWriter(os.path.join('exp', 'Unet3D-CosineLR-5e-3'));
     best_loss = 100;
     start_epoch = 0;
@@ -170,7 +170,7 @@ if __name__ == "__main__":
 
     train_loader, test_loader = get_loader(0);
     sample_output_interval = 10;
-    for epoch in range(start_epoch, 1000):
+    for epoch in range(start_epoch, 500):
         model.train();
         train_loss = train(model, train_loader, optimizer, scalar); 
         model.eval();
