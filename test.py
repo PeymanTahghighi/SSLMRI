@@ -178,7 +178,9 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
     file_name = file_name[:file_name.find('.')];
     
     if use_cached is False:
-        crop = RandSpatialCropd(keys=['image1','image2', 'mask1', 'mask2'],roi_size= (config.CROP_SIZE_W,config.CROP_SIZE_H,config.CROP_SIZE_D),random_size=False);
+        crop = RandSpatialCropd(keys=['image1','image2', 'mask1', 'mask2'],roi_size= (config.hyperparameters['crop_size_w'],
+                                                                                      config.hyperparameters['crop_size_h'],
+                                                                                      config.hyperparameters['crop_size_d']),random_size=False);
         normalize_internsity = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
         def preprocess(mrimage):
             mask = mrimage > threshold_otsu(mrimage);
@@ -216,25 +218,22 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
             # We convert the matched image back to numpy array
             matched_moving_image_data = sitk.GetArrayFromImage(matched_moving_sitk)
 
-            #rigid_registered_image, rigid_transform = rigid_registration(fixed_sitk, matched_moving_sitk)
-            #rigid_registered_image_data = sitk.GetArrayFromImage(rigid_registered_image)
+            rigid_registered_image, rigid_transform = rigid_registration(fixed_sitk, matched_moving_sitk)
+            rigid_registered_image_data = sitk.GetArrayFromImage(rigid_registered_image)
 
             fixed_image_data = window_center_adjustment(fixed_image_data);
-            rigid_registered_image_data = window_center_adjustment(matched_moving_image_data);
+            rigid_registered_image_data = window_center_adjustment(rigid_registered_image_data);
 
             fixed_image_data, fixed_image_data_mask = preprocess(fixed_image_data);
             rigid_registered_image_data, rigid_registered_image_data_mask = preprocess(rigid_registered_image_data);
 
             fixed_image_data = fixed_image_data.squeeze();
             rigid_registered_image_data = rigid_registered_image_data.squeeze();
-            fixed_image_data_tmp = torch.zeros((179,240,240), dtype=fixed_image_data.dtype);
-            fixed_image_data_tmp[:172,:,:] = fixed_image_data;
-            fixed_image_data = fixed_image_data_tmp;
 
             w,h,d = fixed_image_data.shape;
-            new_w = math.ceil(w / config.CROP_SIZE_W) * config.CROP_SIZE_W;
-            new_h = math.ceil(h / config.CROP_SIZE_H) * config.CROP_SIZE_H;
-            new_d = math.ceil(d / config.CROP_SIZE_D) * config.CROP_SIZE_D;
+            new_w = math.ceil(w / config.hyperparameters['crop_size_w']) * config.hyperparameters['crop_size_w'];
+            new_h = math.ceil(h / config.hyperparameters['crop_size_h']) * config.hyperparameters['crop_size_h'];
+            new_d = math.ceil(d / config.hyperparameters['crop_size_d']) * config.hyperparameters['crop_size_d'];
 
             fixed_image_data_padded  = torch.zeros((new_w, new_h, new_d), dtype = fixed_image_data.dtype);
             rigid_registered_image_data_padded  = torch.zeros((new_w, new_h, new_d), dtype = fixed_image_data.dtype);
@@ -242,13 +241,13 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
             fixed_image_data_padded[:w,:h,:d] = fixed_image_data;
             rigid_registered_image_data_padded[:w,:h,:d] = rigid_registered_image_data;
 
-            step_w, step_h, step_d = config.CROP_SIZE_W, config.CROP_SIZE_H, config.CROP_SIZE_D;
+            step_w, step_h, step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
             fixed_image_data_patches = patchify(fixed_image_data_padded.numpy(), 
-                                                (config.CROP_SIZE_W, config.CROP_SIZE_H, config.CROP_SIZE_D), 
+                                                (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                 (step_w, step_h, step_d));
             
             rigid_registered_image_data_patches = patchify(rigid_registered_image_data_padded.numpy(), 
-                                                (config.CROP_SIZE_W, config.CROP_SIZE_H, config.CROP_SIZE_D), 
+                                                (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                 (step_w, step_h, step_d));
 
             predicted_mri = np.zeros((new_w, new_h, new_d,3), dtype = np.float64);
@@ -316,25 +315,25 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
                         
                         
                         #add mri to the whole predicted mri
-                        predicted_mri[i*step_w:(i)*step_w + config.CROP_SIZE_W, 
-                                    j*step_h:(j)*step_h + config.CROP_SIZE_H, 
-                                    k*step_d:(k)*step_d + config.CROP_SIZE_D,:] = mri;
+                        predicted_mri[i*step_w:(i)*step_w + config.hyperparameters['crop_size_w'], 
+                                    j*step_h:(j)*step_h + config.hyperparameters['crop_size_h'], 
+                                    k*step_d:(k)*step_d + config.hyperparameters['crop_size_d'],:] = mri;
                         
-                        predicted_mri_noisy[i*step_w:(i)*step_w + + config.CROP_SIZE_W, 
-                                    j*step_h:(j)*step_h+ config.CROP_SIZE_H, 
-                                    k*step_d:(k)*step_d+ config.CROP_SIZE_D] = mri_noisy;
+                        predicted_mri_noisy[i*step_w:(i)*step_w + + config.hyperparameters['crop_size_w'], 
+                                    j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
+                                    k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d']] = mri_noisy;
                         
-                        predicted_negative_thresh[i*step_w:(i)*step_w + + config.CROP_SIZE_W, 
-                                    j*step_h:(j)*step_h+ config.CROP_SIZE_H, 
-                                    k*step_d:(k)*step_d+ config.CROP_SIZE_D,:] = hm1_negative_thresh;
+                        predicted_negative_thresh[i*step_w:(i)*step_w + + config.hyperparameters['crop_size_w'], 
+                                    j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
+                                    k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d'],:] = hm1_negative_thresh;
                         
-                        predicted_positive_thresh[i*step_w:(i)*step_w + + config.CROP_SIZE_W, 
-                                    j*step_h:(j)*step_h+ config.CROP_SIZE_H, 
-                                    k*step_d:(k)*step_d+ config.CROP_SIZE_D,:] = hm1_positive_thresh;
+                        predicted_positive_thresh[i*step_w:(i)*step_w + + config.hyperparameters['crop_size_w'], 
+                                    j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
+                                    k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d'],:] = hm1_positive_thresh;
                         
-                        predicted_hm1_color[i*step_w:(i)*step_w + + config.CROP_SIZE_W, 
-                                    j*step_h:(j)*step_h+ config.CROP_SIZE_H, 
-                                    k*step_d:(k)*step_d+ config.CROP_SIZE_D,:] = hm1_color;
+                        predicted_hm1_color[i*step_w:(i)*step_w + + config.hyperparameters['crop_size_w'], 
+                                    j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
+                                    k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d'],:] = hm1_color;
 
             predicted_mri = predicted_mri[:w,:h,:d,:];
             predicted_mri_noisy = predicted_mri_noisy[:w,:h,:d];
@@ -512,7 +511,7 @@ if __name__ == "__main__":
             num_res_units=2,
             );
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load('best_model-UNET3D.ckpt');
+    ckpt = torch.load('best_model.ckpt');
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 

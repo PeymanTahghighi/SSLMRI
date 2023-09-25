@@ -198,10 +198,10 @@ def get_loader(fold):
     train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
 
     mri_dataset_train = MRI_Dataset_3D(train_mri);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=1, pin_memory=True);
     test_mri = glob(os.path.join('cache',f'{fold}','*.tstd'));
     mri_dataset_test = MRI_Dataset_3D(test_mri, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=8, pin_memory=True);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=1, pin_memory=True);
 
     return train_loader, test_loader;   
 
@@ -337,9 +337,9 @@ def add_synthetic_lesion_3d(img, mask_g):
     _,h,w,d = mri.shape;
 
     mask_cpy = deepcopy(mask_g);
-    size_x = np.random.randint(10,20) if config.hyperparameters['deterministic'] is False else 15;
-    size_y = np.random.randint(10,30) if config.hyperparameters['deterministic'] is False else 15;
-    size_z = np.random.randint(10,30) if config.hyperparameters['deterministic'] is False else 15;
+    size_x = np.random.randint(15,25) if config.hyperparameters['deterministic'] is False else 15;
+    size_y = np.random.randint(30,50) if config.hyperparameters['deterministic'] is False else 15;
+    size_z = np.random.randint(30,50) if config.hyperparameters['deterministic'] is False else 15;
     mask_cpy[:,:,:,d-size_z:] = 0;
     mask_cpy[:,:,:,:size_z+1] = 0;
     mask_cpy[:,:,w-size_y:,:] = 0;
@@ -347,11 +347,11 @@ def add_synthetic_lesion_3d(img, mask_g):
     mask_cpy[:,h-size_x:,:,:] = 0;
     mask_cpy[:,:size_x+1,:,:] = 0;
     pos_cords = np.where(mask_cpy==1);
-    if len(pos_cords) != 0:
+    if len(pos_cords[0]) != 0:
         r = np.random.randint(0,len(pos_cords[0]));
         center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
     else:
-        center = [img.shape[0]//2, img.shape[1]//2, img.shape[2]/2]
+        center = [img.shape[0]//2, img.shape[1]//2, img.shape[2]//2]
     
  
     #shape
