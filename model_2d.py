@@ -66,22 +66,22 @@ class Upblock(nn.Module):
         return out;
 #---------------------------------------------------------------
 
-#---------------------------------------------------------------
-class Unet(nn.Module):
+class AttenUnet3D(nn.Module):
     def __init__(self) -> None:
         super().__init__();
-        resnet = models.resnet50(pretrained= False);
-        ckpt = torch.load('resnet50.pth');
-        resnet.load_state_dict(ckpt);
+        resnet = resnet50();
+        ckpt = torch.load('resnet_50.pth')['state_dict'];
+        modified_keys = {};
+        for k in ckpt.keys():
+            new_k = k.replace('module.','');
+            modified_keys[new_k] = ckpt[k];
+        resnet.load_state_dict(modified_keys, strict=False);
         self.input_blocks = ConvBlock(1,64,3,2);
         self.input_pool = list(resnet.children())[3];
-        resnet_down_blocks = [];
+        self.down_blocks = nn.ModuleList();
         for btlnck in list(resnet.children()):
             if isinstance(btlnck, nn.Sequential):
-                resnet_down_blocks.append(btlnck);
-                print(btlnck);
-        
-        self.down_blocks = nn.Sequential(*resnet_down_blocks);
+                self.down_blocks.append(btlnck);
 
         self.bottle_neck = nn.Sequential(
             ConvBlock(2048, 2048, 3, 1),
@@ -95,6 +95,12 @@ class Unet(nn.Module):
         self.up_3 = Upblock(512,256);
         self.up_4 = Upblock(256, 128, 128+64)
         self.up_5 = Upblock(128, 64, 128);
+
+        self.ca5 = CrossAttention(2048);
+        self.ca4 = CrossAttention(1024);
+        self.ca3 = CrossAttention(512);
+        self.ca2 = CrossAttention(256);
+        self.ca1 = CrossAttention(64);
 
 
         self.feature_selection_modules = nn.ModuleList();
@@ -125,10 +131,7 @@ class Unet(nn.Module):
             ConvBlock(feature_size, feature_size, 3, 1),
         )
         atten = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            # nn.Linear(feature_size,feature_size/2),
-            # nn.ReLU(),
-            # nn.Linear(feature_size/2,feature_size),
+            nn.AdaptiveAvgPool3d(1),
             nn.Sigmoid()
         )
 
@@ -160,10 +163,10 @@ class Unet(nn.Module):
         inp1_d5, inp1_d4, inp1_d3, inp1_d2, inp1_d1, inp_feat_1 = self.down_stream(inp1);
         inp2_d5, inp2_d4, inp2_d3, inp2_d2, inp2_d1, inp_feat_2 = self.down_stream(inp2);
 
-        d_5 = self.squeeze_excitation_block(inp1_d5, inp2_d5, 0);
-        d_4 = self.squeeze_excitation_block(inp1_d4, inp2_d4, 1);
-        d_3 = self.squeeze_excitation_block(inp1_d3, inp2_d3, 2);
-        d_2 = self.squeeze_excitation_block(inp1_d2, inp2_d2, 3);
+        d_5 = self.ca5(inp1_d5, inp2_d5);
+        d_4 = self.ca4(inp1_d4, inp2_d4);
+        d_3 = self.ca3(inp1_d3, inp2_d3);
+        d_2 = self.ca2(inp1_d2, inp2_d2);
         d_1 = self.squeeze_excitation_block(inp1_d1, inp2_d1, 4);
         inp_feat = self.squeeze_excitation_block(inp_feat_1, inp_feat_2, 5);
     

@@ -1,4 +1,4 @@
-from data_utils import cache_mri_gradients, get_loader, cache_test_dataset, update_folds
+from data_utils import cache_mri_gradients, get_loader, cache_test_dataset, update_folds, update_folds_lesjak, cache_test_dataset_lesjak, get_loader_lesjak
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -6,7 +6,7 @@ import torch.optim as optim
 import torch
 import config
 import torch.nn.functional as F
-from model_3d import UNet3D
+from model_3d import UNet3D, CrossAttentionUNet3D
 from torch.utils.tensorboard import SummaryWriter
 import os
 from torchvision.utils import save_image, make_grid
@@ -136,16 +136,17 @@ def log_gradients_in_model(model, logger, step):
 
 if __name__ == "__main__":
     
-    #update_folds();
+    #update_folds_lesjak();
+    #cache_test_dataset_lesjak(0);
     #cache_mri_gradients();
 
     RESUME = False;
-    model = UNet3D(
+    model = CrossAttentionUNet3D(
             spatial_dims=3,
             in_channels=1,
             out_channels=1,
             channels=(64, 128, 256, 512),
-            strides=(2, 2, 2),
+            strides=(4, 2, 2),
             num_res_units=2,
             );
     
@@ -157,7 +158,7 @@ if __name__ == "__main__":
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
     optimizer = optim.Adam(model.parameters(), lr = config.hyperparameters['learning_rate']);
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=500, eta_min= 1e-6);
-    summary_writer = SummaryWriter(os.path.join('exp', 'Unet3D-CosineLR-5e-3'));
+    summary_writer = SummaryWriter(os.path.join('exp', 'Unet3D-crossatten'));
     best_loss = 100;
     start_epoch = 0;
 
