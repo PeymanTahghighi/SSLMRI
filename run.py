@@ -16,9 +16,11 @@ def train(model, train_loader, optimizer, scalar):
     print(('\n' + '%10s'*2) %('Epoch', 'Loss'));
     pbar = tqdm(enumerate(train_loader), total= len(train_loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     epoch_loss = [];
+    curr_step = 0;
     for batch_idx, (batch) in pbar:
         mri, mri_noisy, mask, heatmap = batch[0].to('cuda').unsqueeze(dim=2).squeeze(dim=0), batch[1].to('cuda').unsqueeze(dim=2).squeeze(dim=0), batch[2].to('cuda').squeeze(dim=0), batch[3].to('cuda').squeeze(dim=0);
         steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
+        curr_loss = 0;
         for s in range(steps):
             curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
@@ -36,14 +38,18 @@ def train(model, train_loader, optimizer, scalar):
                 lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
                 lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
                 lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
-                total_loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
-            scalar.scale(total_loss).backward();
-            epoch_loss.append(total_loss.item());
+                loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
+            scalar.scale(loss).backward();
+            curr_loss += loss.item();
+            curr_step+=1;
 
-            if ((batch_idx+1) % config.hyperparameters['virtual_batch_size'] == 0 or (batch_idx+1) == len(train_loader)):
+            if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
                 scalar.step(optimizer);
                 scalar.update();
                 model.zero_grad(set_to_none = True);
+                epoch_loss.append(curr_loss);
+                curr_loss = 0;
+                curr_step = 0;
 
             pbar.set_description(('%10s' + '%10.4g')%(epoch, np.mean(epoch_loss)));
 

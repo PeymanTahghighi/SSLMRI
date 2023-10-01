@@ -11,7 +11,7 @@ import config
 from sklearn.model_selection import train_test_split, KFold
 import nibabel as nib
 from skimage.filters import gaussian, sobel, threshold_otsu, try_all_threshold
-from monai.transforms import Compose, SpatialPadd, ScaleIntensityRange, Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise
+from monai.transforms import Compose, Resize, SpatialPadd, ScaleIntensityRange, Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise
 from scipy.ndimage import convolve
 from tqdm import tqdm
 import math
@@ -88,6 +88,7 @@ class MRI_Dataset(Dataset):
             pos=1, 
             neg=0,
             num_samples=1 if cache else config.hyperparameters['sample_per_mri'] if train else 1);
+        self.resize = Resize(spatial_size=[config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']]);
 
         self.train = train;
         self.cache = cache;
@@ -189,6 +190,7 @@ class MRI_Dataset(Dataset):
             return ret_mrimage, ret_mrimage_noisy, ret_mask, ret_total_heatmap;
         else:
             ret = self.mr_images[index];
+            ret = [self.resize(r.unsqueeze(dim=0)).squeeze() for r in ret];
             return ret;
 
 
@@ -422,7 +424,7 @@ def get_loader(fold):
     
     train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
 
-    mri_dataset_train = MRI_Dataset(train_mri[:1]);
+    mri_dataset_train = MRI_Dataset(train_mri);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
     test_mri = glob(os.path.join('cache',f'{fold}','*.tstd'));
     mri_dataset_test = MRI_Dataset(test_mri, train=False);
@@ -468,8 +470,8 @@ def add_synthetic_lesion_3d(img, mask_g):
 
     mask_cpy = deepcopy(mask_g);
     size_x = np.random.randint(15,25) if config.hyperparameters['deterministic'] is False else 15;
-    size_y = np.random.randint(15,50) if config.hyperparameters['deterministic'] is False else 15;
-    size_z = np.random.randint(15,50) if config.hyperparameters['deterministic'] is False else 15;
+    size_y = np.random.randint(15,35) if config.hyperparameters['deterministic'] is False else 15;
+    size_z = np.random.randint(15,35) if config.hyperparameters['deterministic'] is False else 15;
     mask_cpy[:,:,:,d-size_z:] = 0;
     mask_cpy[:,:,:,:size_z+1] = 0;
     mask_cpy[:,:,w-size_y:,:] = 0;
