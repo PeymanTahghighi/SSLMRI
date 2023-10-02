@@ -142,7 +142,7 @@ def log_gradients_in_model(model, logger, step):
 
 if __name__ == "__main__":
     
-    #update_folds_lesjak();
+    #update_folds();
     #cache_test_dataset_lesjak(0);
     #cache_mri_gradients();
 

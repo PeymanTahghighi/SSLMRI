@@ -190,7 +190,6 @@ class MRI_Dataset(Dataset):
             return ret_mrimage, ret_mrimage_noisy, ret_mask, ret_total_heatmap;
         else:
             ret = self.mr_images[index];
-            ret = [self.resize(r.unsqueeze(dim=0)).squeeze() for r in ret];
             return ret;
 
 
@@ -469,9 +468,9 @@ def add_synthetic_lesion_3d(img, mask_g):
     _,h,w,d = mri.shape;
 
     mask_cpy = deepcopy(mask_g);
-    size_x = np.random.randint(15,25) if config.hyperparameters['deterministic'] is False else 15;
-    size_y = np.random.randint(15,35) if config.hyperparameters['deterministic'] is False else 15;
-    size_z = np.random.randint(15,35) if config.hyperparameters['deterministic'] is False else 15;
+    size_x = np.random.randint(10,25) if config.hyperparameters['deterministic'] is False else 15;
+    size_y = np.random.randint(10,35) if config.hyperparameters['deterministic'] is False else 15;
+    size_z = np.random.randint(10,35) if config.hyperparameters['deterministic'] is False else 15;
     mask_cpy[:,:,:,d-size_z:] = 0;
     mask_cpy[:,:,:,:size_z+1] = 0;
     mask_cpy[:,:,w-size_y:,:] = 0;
