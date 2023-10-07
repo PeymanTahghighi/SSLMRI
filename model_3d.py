@@ -379,13 +379,6 @@ class UNet3D(nn.Module):
                            adn_ordering=self.adn_ordering, 
                            bias=self.bias));
 
-        # self.output = Convolution(
-        #     spatial_dims=self.dimensions,
-        #     in_channels = channels[0],
-        #     out_channels=out_channels,
-        #     kernel_size=1,
-        #     conv_only=True,
-        # )
 
         self.feature_selection_modules = nn.ModuleList();
         self.feature_refinement_modules = nn.ModuleList();

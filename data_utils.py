@@ -436,9 +436,9 @@ def get_loader_isbi(fold):
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_isbi',f'{fold}.fold'), 'rb'));
 
     mri_dataset_train = ISBI_Dataset(train_ids, train=True);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=0, pin_memory=True);
     mri_dataset_test = ISBI_Dataset(test_ids, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=8, pin_memory=True);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
 
     return train_loader, test_loader;   
 

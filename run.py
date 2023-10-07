@@ -136,54 +136,94 @@ def save_examples(model, loader,):
         pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         counter = 0;
         for idx, (batch) in pbar:
-            mri, mri_noisy, mask, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda'), batch[3].to('cuda').unsqueeze(dim=1); 
+            mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda');
             hm1 = model(mri, mri_noisy);
             hm2 = model(mri_noisy, mri);
-            mri_recon = (mri_noisy+hm2);
-            mri_noisy_recon = (mri+hm1);
-            mri = (mri);
-            mri_noisy = (mri_noisy);
             heatmap = heatmap.detach().cpu().numpy();
+            hm1 = torch.sigmoid(hm1);
+            hm2 = torch.sigmoid(hm2);
             hm1 = hm1.detach().cpu().numpy();
             hm2 = hm2.detach().cpu().numpy();
-            mri_recon = mri_recon.detach().cpu().numpy();
-            mri_noisy_recon = mri_noisy_recon.detach().cpu().numpy();
             mri = mri.detach().cpu().numpy();
             mri_noisy = mri_noisy.detach().cpu().numpy();
             for j in range(2):
                 heatmap = (1-heatmap) > 0;
                 pos_cords = np.where(heatmap[0] == 0);
-                r = np.random.randint(0, len(pos_cords[0]));
-                fig, ax = plt.subplots(3,6);
-                ax[0][0].imshow(hm1[0,0,pos_cords[1][r], :, :], cmap='hot');
-                ax[0][1].imshow(hm1[0,0,:,pos_cords[2][r], :], cmap='hot');
-                ax[0][2].imshow(hm1[0,0, :, :,pos_cords[3][r]], cmap='hot');
+                if len(pos_cords[0]) != 0:
+                    r = np.random.randint(0,len(pos_cords[0]));
+                    center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+                else:
+                    center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
+                fig, ax = plt.subplots(2,6);
+                ax[0][0].imshow(hm1[0,0,center[0], :, :], cmap='hot');
+                ax[0][1].imshow(hm1[0,0,:,center[1], :], cmap='hot');
+                ax[0][2].imshow(hm1[0,0, :, :,center[2]], cmap='hot');
 
-                ax[0][3].imshow(hm2[0,0,pos_cords[1][r], :, :], cmap='hot');
-                ax[0][4].imshow(hm2[0,0,:,pos_cords[2][r], :], cmap='hot');
-                ax[0][5].imshow(hm2[0,0, :, :,pos_cords[3][r]], cmap='hot');
+                ax[0][3].imshow(hm2[0,0,center[0], :, :], cmap='hot');
+                ax[0][4].imshow(hm2[0,0,:,center[1], :], cmap='hot');
+                ax[0][5].imshow(hm2[0,0, :, :,center[2]], cmap='hot');
 
-                ax[1][0].imshow(mri[0,0,pos_cords[1][r], :, :], cmap='gray');
-                ax[1][1].imshow(mri[0,0,:,pos_cords[2][r], :], cmap='gray');
-                ax[1][2].imshow(mri[0,0, :, :,pos_cords[3][r]], cmap='gray');
+                ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
+                ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
+                ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
 
-                ax[1][3].imshow(mri_noisy[0,0,pos_cords[1][r], :, :], cmap='gray');
-                ax[1][4].imshow(mri_noisy[0,0,:,pos_cords[2][r], :], cmap='gray');
-                ax[1][5].imshow(mri_noisy[0,0, :, :,pos_cords[3][r]], cmap='gray');
+                ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
+                ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
+                ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
 
-                ax[2][0].imshow(mri_noisy_recon[0,0,pos_cords[1][r], :, :], cmap='gray');
-                ax[2][1].imshow(mri_noisy_recon[0,0,:,pos_cords[2][r], :], cmap='gray');
-                ax[2][2].imshow(mri_noisy_recon[0,0, :, :,pos_cords[3][r]], cmap='gray');
-
-                ax[2][3].imshow(mri_recon[0,0,pos_cords[1][r], :, :], cmap='gray');
-                ax[2][4].imshow(mri_recon[0,0,:,pos_cords[2][r], :], cmap='gray');
-                ax[2][5].imshow(mri_recon[0,0, :, :,pos_cords[3][r]], cmap='gray');
                 fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
                 plt.close("all");
 
             counter += 1;
             if counter >=5:
                 break;
+
+            #for regression
+            # mri_recon = (mri_noisy+hm2);
+            # mri_noisy_recon = (mri+hm1);
+
+            # heatmap = heatmap.detach().cpu().numpy();
+            # hm1 = hm1.detach().cpu().numpy();
+            # hm2 = hm2.detach().cpu().numpy();
+            # mri_recon = mri_recon.detach().cpu().numpy();
+            # mri_noisy_recon = mri_noisy_recon.detach().cpu().numpy();
+            # mri = mri.detach().cpu().numpy();
+            # mri_noisy = mri_noisy.detach().cpu().numpy();
+            # for j in range(2):
+            #     heatmap = (1-heatmap) > 0;
+            #     pos_cords = np.where(heatmap[0] == 0);
+            #     r = np.random.randint(0, len(pos_cords[0]));
+            #     fig, ax = plt.subplots(3,6);
+            #     ax[0][0].imshow(hm1[0,0,pos_cords[1][r], :, :], cmap='hot');
+            #     ax[0][1].imshow(hm1[0,0,:,pos_cords[2][r], :], cmap='hot');
+            #     ax[0][2].imshow(hm1[0,0, :, :,pos_cords[3][r]], cmap='hot');
+
+            #     ax[0][3].imshow(hm2[0,0,pos_cords[1][r], :, :], cmap='hot');
+            #     ax[0][4].imshow(hm2[0,0,:,pos_cords[2][r], :], cmap='hot');
+            #     ax[0][5].imshow(hm2[0,0, :, :,pos_cords[3][r]], cmap='hot');
+
+            #     ax[1][0].imshow(mri[0,0,pos_cords[1][r], :, :], cmap='gray');
+            #     ax[1][1].imshow(mri[0,0,:,pos_cords[2][r], :], cmap='gray');
+            #     ax[1][2].imshow(mri[0,0, :, :,pos_cords[3][r]], cmap='gray');
+
+            #     ax[1][3].imshow(mri_noisy[0,0,pos_cords[1][r], :, :], cmap='gray');
+            #     ax[1][4].imshow(mri_noisy[0,0,:,pos_cords[2][r], :], cmap='gray');
+            #     ax[1][5].imshow(mri_noisy[0,0, :, :,pos_cords[3][r]], cmap='gray');
+
+            #     ax[2][0].imshow(mri_noisy_recon[0,0,pos_cords[1][r], :, :], cmap='gray');
+            #     ax[2][1].imshow(mri_noisy_recon[0,0,:,pos_cords[2][r], :], cmap='gray');
+            #     ax[2][2].imshow(mri_noisy_recon[0,0, :, :,pos_cords[3][r]], cmap='gray');
+
+            #     ax[2][3].imshow(mri_recon[0,0,pos_cords[1][r], :, :], cmap='gray');
+            #     ax[2][4].imshow(mri_recon[0,0,:,pos_cords[2][r], :], cmap='gray');
+            #     ax[2][5].imshow(mri_recon[0,0, :, :,pos_cords[3][r]], cmap='gray');
+            #     fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
+            #     plt.close("all");
+
+            # counter += 1;
+            # if counter >=5:
+            #     break;
+            #----------------------------------------
 
 def log_gradients_in_model(model, logger, step):
     for tag, value in model.named_parameters():
@@ -230,6 +270,7 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loader_isbi(0);
     sample_output_interval = 10;
     for epoch in range(start_epoch, 500):
+        save_examples(model, test_loader);
         model.train();
         train_loss = train(model, train_loader, optimizer, scalar); 
         
