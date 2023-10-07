@@ -227,7 +227,6 @@ class ResUnet3D(nn.Module):
 
         self.final = nn.Sequential(
             ConvBlock(64,1,1,1),
-            nn.Tanh()
         )
 
 
@@ -304,10 +303,10 @@ class UNet3D(nn.Module):
         kernel_size: Union[Sequence[int], int] = 3,
         up_kernel_size: Union[Sequence[int], int] = 3,
         num_res_units: int = 0,
-        act: Union[Tuple, str] = Act.PRELU,
+        act: Union[Tuple, str] = Act.LEAKYRELU,
         norm: Union[Tuple, str] = "BATCH",
         dropout: float = 0.0,
-        bias: bool = True,
+        bias: bool = False,
         adn_ordering: str = "NDA",
         dimensions: Optional[int] = None,
     ) -> None:
@@ -399,8 +398,7 @@ class UNet3D(nn.Module):
             self.feature_attention_modules.append(layers[2]);
 
         self.final = nn.Sequential(
-            ConvBlock(rev_channels[-1],1,1,1),
-            nn.Tanh()
+            nn.Conv3d(rev_channels[-1], 1, 1, 1, bias=False, padding=0),
         )
 
         self._init_weights();
@@ -705,12 +703,11 @@ class CrossAttentionUNet3D(nn.Module):
 
         return out;
 
-
 def test():
 
     sample = torch.rand((1,1,64,128,128)).to('cuda');
 
-    net = CrossAttentionUNet3D(
+    net = UNet3D(
         spatial_dims=3,
         in_channels=1,
         out_channels=1,

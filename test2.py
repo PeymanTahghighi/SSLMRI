@@ -2,6 +2,7 @@ from graphviz import Digraph
 import torch
 from torch.autograd import Variable, Function
 from model_3d import UNet3D
+import nibabel as nib
 
 def iter_graph(root, callback):
     queue = [root]
@@ -65,6 +66,12 @@ def register_hooks(var):
 
 import os
 if __name__ == '__main__':
+
+    mri = nib.load('t1_ai_msles2_1mm_pn3_rf20.mnc');
+    d = mri.get_fdata();
+    nib.save(mri, 'b1.nii.gz');
+
+
     os.environ["PATH"] += os.pathsep + 'C:\\Graphviz\\bin'
     sample = torch.rand((1,4,64,64,64)).to('cuda');
 
