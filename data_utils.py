@@ -586,7 +586,7 @@ def add_synthetic_lesion_wm(img, mask_g):
             r = np.random.randint(0,len(pos_cords[0]));
             center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
         else:
-            center = [img.shape[0]//2, img.shape[1]//2, img.shape[2]//2]
+            center = [img.shape[1]//2, img.shape[2]//2, img.shape[3]//2]
     else:
         center = [pos_cords[1][50], pos_cords[2][50],pos_cords[3][50]]
     

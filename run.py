@@ -270,7 +270,7 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loader_isbi(0);
     sample_output_interval = 10;
     for epoch in range(start_epoch, 500):
-        save_examples(model, test_loader);
+
         model.train();
         train_loss = train(model, train_loader, optimizer, scalar); 
         
