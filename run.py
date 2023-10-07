@@ -55,21 +55,21 @@ def train(model, train_loader, optimizer, scalar):
     curr_step = 0;
     curr_iou = 0;
     for batch_idx, (batch) in pbar:
-        mri, mri_noisy, heatmap = batch[0].to('cuda').squeeze(dim=0), batch[1].to('cuda').squeeze(dim=0), batch[2].to('cuda').squeeze(dim=0)
-        steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
+        mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda')
+        #steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
         curr_loss = 0;
-        for s in range(steps):
-            curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+        for s in range(1):
+            curr_mri = mri#[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_mri_noisy = mri_noisy#[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_heatmap = heatmap#[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
             assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
             with torch.cuda.amp.autocast_mode.autocast():
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = sigmoid_focal_loss(hm1.squeeze(dim=1), curr_heatmap.squeeze(dim=1), reduction="mean");
+                lhf1 = sigmoid_focal_loss(hm1.squeeze(dim=1), curr_heatmap.squeeze(dim=1).float(), reduction="mean");
                 lhd1 = dice_loss(hm1, curr_heatmap);
-                lhf2 = sigmoid_focal_loss(hm2.squeeze(dim=1), curr_heatmap.squeeze(dim=1), reduction="mean");
+                lhf2 = sigmoid_focal_loss(hm2.squeeze(dim=1), curr_heatmap.squeeze(dim=1).float(), reduction="mean");
                 lhd2 = dice_loss(hm2, curr_heatmap);
                 #lhh = dice_loss(hm1, hm2, sigmoid=True);
                 loss = (lhf1 + lhd1 + lhf2 + lhd2)/ config.hyperparameters['virtual_batch_size'];
@@ -147,8 +147,8 @@ def save_examples(model, loader,):
             mri = mri.detach().cpu().numpy();
             mri_noisy = mri_noisy.detach().cpu().numpy();
             for j in range(2):
-                heatmap = (1-heatmap) > 0;
-                pos_cords = np.where(heatmap[0] == 0);
+                #heatmap = (1-heatmap) > 0;
+                pos_cords = np.where(heatmap[0] >0);
                 if len(pos_cords[0]) != 0:
                     r = np.random.randint(0,len(pos_cords[0]));
                     center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
@@ -270,7 +270,7 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loader_isbi(0);
     sample_output_interval = 10;
     for epoch in range(start_epoch, 500):
-
+        save_examples(model, test_loader);
         model.train();
         train_loss = train(model, train_loader, optimizer, scalar); 
         

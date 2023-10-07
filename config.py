@@ -1,7 +1,7 @@
 import torch
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu';
 hyperparameters = {
-    'batch_size' : 2,
+    'batch_size' : 1,
     'crop_size_w': 128,
     'crop_size_h': 128,
     'crop_size_d':64,

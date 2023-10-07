@@ -203,7 +203,7 @@ class ISBI_Dataset(Dataset):
         self.transforms = Compose(
             [
                 
-                NormalizeIntensity()
+                NormalizeIntensity(subtrahend=0.5, divisor=0.5)
             ]
         )
         
@@ -241,18 +241,18 @@ class ISBI_Dataset(Dataset):
                 self.mri.append([curr_mri, curr_gt]);
 
         else:
+            mri_temp = [];
+            gt_temp = [];
             for patient_path in patient_ids:
                 patient_id = patient_path[patient_path.rfind('/')+1:]
                 num_mri = len(os.listdir(os.path.join(patient_path, 'preprocessed')))//4;
                 curr_mri = [];
                 curr_gt = [];
-                mri_temp = [];
-                gt_temp = [];
                 for n in range(1,int(num_mri)+1):
                     mri = nib.load(os.path.join(patient_path, 'preprocessed', f'{patient_id}_0{n}_flair_pp.nii'));
                     mri = mri.get_fdata();
                     mri = window_center_adjustment(mri);
-                    gt = nib.load(os.path.join(patient_path, 'masks', f'{patient_id}_0{n}_mask1.nii'));
+                    gt = nib.load(os.path.join(patient_path, 'masks', f'{patient_id}_0{n}_mask2.nii'));
                     gt = gt.get_fdata();
                     
 
@@ -277,18 +277,21 @@ class ISBI_Dataset(Dataset):
                     mri_patches = mri_patches.reshape(mri_patches.shape[0]*mri_patches.shape[1]*mri_patches.shape[2], mri_patches.shape[3], mri_patches.shape[4],mri_patches.shape[5]);
                     gt_patches = gt_patches.reshape(gt_patches.shape[0]*gt_patches.shape[1]*gt_patches.shape[2], gt_patches.shape[3], gt_patches.shape[4],gt_patches.shape[5]);
                 
-                    mri_temp.append(mri_patches);
-                    gt_temp.append(gt_patches);
+                    curr_mri.append(mri_patches);
+                    curr_gt.append(gt_patches);
+                mri_temp.append(curr_mri);
+                gt_temp.append(curr_gt);
             
             temp = [];
-            for i in range(len(mri_temp)):
-                for j in range(i+1,len(mri_temp)):
-                    mri1 = mri_temp[i];
-                    mri2 = mri_temp[j];
-                    gt1 = gt_temp[i] > 0;
-                    gt2 = gt_temp[j] > 0;
-                    t = [[[mri1[k],mri2[k]], np.clip(gt1[k] + gt2[k], 0, 1) - (gt1[k])*(gt2[k])] for k in range(mri1.shape[0])]
-                    temp.extend(t);
+            for l in range(len(mri_temp)):
+                for i in range(len(mri_temp[l])):
+                    for j in range(i+1,len(mri_temp[l])):
+                        mri1 = mri_temp[l][i];
+                        mri2 = mri_temp[l][j];
+                        gt1 = gt_temp[l][i];
+                        gt2 = gt_temp[l][j];
+                        t = [[[mri1[k],mri2[k], gt1[k], gt2[k]], np.clip(gt1[k] + gt2[k], 0, 1) - (gt1[k])*(gt2[k])] for k in range(mri1.shape[0])]
+                        temp.extend(t);
             self.mri = temp;
     
     def __len__(self):
@@ -362,19 +365,24 @@ class ISBI_Dataset(Dataset):
             return ret_mri1, ret_mri2, ret_gt;
         else:
             mri, ret_gt = self.mri[index];
-            ret_mri1, ret_mri2 = mri[0], mri[1];
+            ret_mri1, ret_mri2, gt1, gt2 = mri[0], mri[1], mri[2], mri[3];
 
             ret_mri1 = ret_mri1 / (np.max(ret_mri1)+1e-4);
             ret_mri2 = ret_mri2 / (np.max(ret_mri2)+1e-4);
+            ret_mri1 +gt1;
+            ret_mri2 +gt2;
 
             ret_mri1 = self.transforms(ret_mri1);
             ret_mri2 = self.transforms(ret_mri2);
 
 
             # pos_cords = np.where(ret_gt == 1);
-            # r = np.random.randint(0,len(pos_cords[0]));
-            # center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
-            #visualize_2d([ret_mri1, ret_mri2, ret_gt], center);
+            # if len(pos_cords[0]) != 0:
+            #     r = np.random.randint(0,len(pos_cords[0]));
+            #     center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+            # else:
+            #     center=[10,10,10]
+            # visualize_2d([ret_mri1, ret_mri2,ret_mri1 +gt1, ret_mri2 +gt2, ret_gt], center);
 
             return ret_mri1, ret_mri2, ret_gt;
 
@@ -435,10 +443,10 @@ def get_loader_isbi(fold):
     
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_isbi',f'{fold}.fold'), 'rb'));
 
-    mri_dataset_train = ISBI_Dataset(train_ids, train=True);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=0, pin_memory=True);
+    mri_dataset_train = ISBI_Dataset(train_ids, train=False);
+    train_loader = DataLoader(mri_dataset_train, config.hyperparameters['batch_size'], True, num_workers=8, pin_memory=True);
     mri_dataset_test = ISBI_Dataset(test_ids, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
+    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=8, pin_memory=True);
 
     return train_loader, test_loader;   
 
