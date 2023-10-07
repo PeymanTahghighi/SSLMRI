@@ -112,7 +112,7 @@ def valid(model, loader):
         for idx, (batch) in pbar:
             mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda')
             hm1 = model(mri, mri_noisy);
-            dice = 1-dice_loss(hm1, heatmap);
+            dice = dice_loss(hm1, heatmap);
 
             # #For regression
             # hm2 = model(mri_noisy, mri);
