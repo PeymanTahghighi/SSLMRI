@@ -14,7 +14,6 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from utility import IoU
 import torch.nn.functional as F
 from torchvision.ops.focal_loss import sigmoid_focal_loss
-from torchgeometry.losses import DiceLoss
 
 #===============================================================
 def dice_loss(input, 

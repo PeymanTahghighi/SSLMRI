@@ -303,10 +303,10 @@ class UNet3D(nn.Module):
         kernel_size: Union[Sequence[int], int] = 3,
         up_kernel_size: Union[Sequence[int], int] = 3,
         num_res_units: int = 0,
-        act: Union[Tuple, str] = Act.LEAKYRELU,
+        act: Union[Tuple, str] = Act.PRELU,
         norm: Union[Tuple, str] = "BATCH",
         dropout: float = 0.0,
-        bias: bool = False,
+        bias: bool = True,
         adn_ordering: str = "NDA",
         dimensions: Optional[int] = None,
     ) -> None:
@@ -379,13 +379,13 @@ class UNet3D(nn.Module):
                            adn_ordering=self.adn_ordering, 
                            bias=self.bias));
 
-        self.output = Convolution(
-            spatial_dims=self.dimensions,
-            in_channels = channels[0],
-            out_channels=out_channels,
-            kernel_size=1,
-            conv_only=True,
-        )
+        # self.output = Convolution(
+        #     spatial_dims=self.dimensions,
+        #     in_channels = channels[0],
+        #     out_channels=out_channels,
+        #     kernel_size=1,
+        #     conv_only=True,
+        # )
 
         self.feature_selection_modules = nn.ModuleList();
         self.feature_refinement_modules = nn.ModuleList();

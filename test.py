@@ -6,7 +6,7 @@ import torch.optim as optim
 import torch
 import config
 import torch.nn.functional as F
-from model_3d import UNet3D,  AttenUnet3D, ResUnet3D
+from model_3d import UNet3D, ResUnet3D
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
@@ -269,8 +269,8 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
                         #mri_mask, mri_noisy_mask = fixed_image_data_mask_trans.to('cuda'), rigid_registered_image_data_mask_trans.to('cuda');
                         hm1 = model(mri, mri_noisy);
                         hm2 = model(mri_noisy, mri);
-                        hm1 = hm1 *2.0;
-                        hm2 = hm2 *2.0;
+                        # hm1 = hm1 *2.0;
+                        # hm2 = hm2 *2.0;
 
                         mri_recon = (mri_noisy+hm2);
                         mri_noisy_recon = (mri+hm1);
@@ -830,7 +830,7 @@ if __name__ == "__main__":
             num_res_units=2,
             );
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load('best_model_unet3d.ckpt');
+    ckpt = torch.load('best_model-linear.ckpt');
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 
