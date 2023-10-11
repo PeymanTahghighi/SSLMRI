@@ -6,3 +6,5 @@ def IoU(mri1, mri2):
     intersection = torch.sum(mri1 * mri2, dim = dims);
     union = torch.sum(mri1 + mri2, dim = dims);
     return torch.mean(intersection / (union+1e-4));
+
+

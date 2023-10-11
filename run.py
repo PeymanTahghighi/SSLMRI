@@ -1,4 +1,4 @@
-from data_utils import cache_mri_gradients, get_loader, cache_test_dataset, update_folds, update_folds_isbi, get_loader_isbi, visualize_2d
+from data_utils import cache_mri_gradients, get_loader, cache_test_dataset, update_folds, update_folds_isbi, get_loader_isbi, visualize_2d, update_folds_miccai, get_loader_miccai
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -14,6 +14,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from utility import IoU
 import torch.nn.functional as F
 from torchvision.ops.focal_loss import sigmoid_focal_loss
+from sklearn.metrics import precision_recall_fscore_support
 
 #===============================================================
 def dice_loss(input, 
@@ -56,12 +57,186 @@ def train(model, train_loader, optimizer, scalar):
     curr_iou = 0;
     for batch_idx, (batch) in pbar:
         mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda')
-        #steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
+        steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
         curr_loss = 0;
-        for s in range(1):
-            curr_mri = mri#[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_mri_noisy = mri_noisy#[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_heatmap = heatmap#[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+        for s in range(steps):
+            curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+
+            assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
+            with torch.cuda.amp.autocast_mode.autocast():
+                hm1 = model(curr_mri, curr_mri_noisy);
+                hm2 = model(curr_mri_noisy, curr_mri);
+                lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
+                lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
+                lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
+                lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
+                lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
+                loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
+
+            scalar.scale(loss).backward();
+            curr_loss += loss.item();
+            curr_step+=1;
+
+
+            if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
+                scalar.step(optimizer);
+                scalar.update();
+                
+                model.zero_grad(set_to_none = True);
+                epoch_loss.append(curr_loss);
+                epoch_IoU.append(curr_iou);
+                curr_loss = 0;
+                curr_step = 0;
+                curr_iou = 0;
+
+            pbar.set_description(('%10s' + '%10.4g'*2)%(epoch, np.mean(epoch_loss), np.mean(epoch_IoU)));
+
+    return np.mean(epoch_loss);
+
+
+def valid(model, loader):
+    print(('\n' + '%10s'*2) %('Epoch', 'Loss'));
+    pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+    epoch_loss = [];
+    with torch.no_grad():
+        for idx, (batch) in pbar:
+            mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda')
+            hm1 = model(mri, mri_noisy);
+            hm2 = model(mri_noisy, mri);
+            lih1 = F.l1_loss((mri+hm1), mri_noisy);
+            lih2 = F.l1_loss((mri_noisy+hm2), mri);
+            lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
+            lh1 = F.l1_loss((hm1)*heatmap, torch.zeros_like(hm1));
+            lh2 = F.l1_loss((hm2)*heatmap, torch.zeros_like(hm1));
+            total_loss = lih1 + lih2 + lhh + lh1 + lh2;
+
+
+            epoch_loss.append(total_loss.item());
+            pbar.set_description(('%10s' + '%10.4g')%(epoch, np.mean(epoch_loss)));
+
+    return np.mean(epoch_loss);
+
+def save_examples_miccai(model, loader,):
+    if os.path.exists('samples') is False:
+        os.makedirs('samples');
+    with torch.no_grad():
+        pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+        counter = 0;
+        for idx, (batch) in pbar:
+            mri, mri_noisy, heatmap, lbl = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3];
+            hm1 = model(mri, mri_noisy);
+            hm2 = model(mri_noisy, mri);
+            heatmap = heatmap.detach().cpu().numpy();
+            hm1 = torch.sigmoid(hm1);
+            hm2 = torch.sigmoid(hm2);
+            hm1 = hm1.detach().cpu().numpy();
+            hm2 = hm2.detach().cpu().numpy();
+            mri = mri.detach().cpu().numpy();
+            mri_noisy = mri_noisy.detach().cpu().numpy();
+            for j in range(2):
+                #heatmap = (1-heatmap) > 0;
+                pos_cords = np.where(heatmap[0] >0);
+                if len(pos_cords[0]) != 0:
+                    r = np.random.randint(0,len(pos_cords[0]));
+                    center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+                else:
+                    center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
+                fig, ax = plt.subplots(2,6);
+                ax[0][0].imshow(hm1[0,0,center[0], :, :], cmap='hot');
+                ax[0][1].imshow(hm1[0,0,:,center[1], :], cmap='hot');
+                ax[0][2].imshow(hm1[0,0, :, :,center[2]], cmap='hot');
+
+                ax[0][3].imshow(hm2[0,0,center[0], :, :], cmap='hot');
+                ax[0][4].imshow(hm2[0,0,:,center[1], :], cmap='hot');
+                ax[0][5].imshow(hm2[0,0, :, :,center[2]], cmap='hot');
+
+                ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
+                ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
+                ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
+
+                ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
+                ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
+                ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
+
+                fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
+                plt.close("all");
+
+            counter += 1;
+            if counter >=5:
+                break;
+
+def save_examples(model, loader,):
+    if os.path.exists('samples') is False:
+        os.makedirs('samples');
+    with torch.no_grad():
+        pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+        counter = 0;
+        for idx, (batch) in pbar:
+            mri, mri_noisy, heatmap = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda');
+            hm1 = model(mri, mri_noisy);
+            hm2 = model(mri_noisy, mri);            
+            mri_recon = (mri_noisy+hm2);
+            mri_noisy_recon = (mri+hm1);
+
+            heatmap = heatmap.detach().cpu().numpy();
+            hm1 = hm1.detach().cpu().numpy();
+            hm2 = hm2.detach().cpu().numpy();
+            mri_recon = mri_recon.detach().cpu().numpy();
+            mri_noisy_recon = mri_noisy_recon.detach().cpu().numpy();
+            mri = mri.detach().cpu().numpy();
+            mri_noisy = mri_noisy.detach().cpu().numpy();
+            for j in range(2):
+                heatmap = (1-heatmap) > 0;
+                pos_cords = np.where(heatmap[0] == 0);
+                r = np.random.randint(0, len(pos_cords[0]));
+                fig, ax = plt.subplots(3,6);
+                ax[0][0].imshow(hm1[0,0,pos_cords[1][r], :, :], cmap='hot');
+                ax[0][1].imshow(hm1[0,0,:,pos_cords[2][r], :], cmap='hot');
+                ax[0][2].imshow(hm1[0,0, :, :,pos_cords[3][r]], cmap='hot');
+
+                ax[0][3].imshow(hm2[0,0,pos_cords[1][r], :, :], cmap='hot');
+                ax[0][4].imshow(hm2[0,0,:,pos_cords[2][r], :], cmap='hot');
+                ax[0][5].imshow(hm2[0,0, :, :,pos_cords[3][r]], cmap='hot');
+
+                ax[1][0].imshow(mri[0,0,pos_cords[1][r], :, :], cmap='gray');
+                ax[1][1].imshow(mri[0,0,:,pos_cords[2][r], :], cmap='gray');
+                ax[1][2].imshow(mri[0,0, :, :,pos_cords[3][r]], cmap='gray');
+
+                ax[1][3].imshow(mri_noisy[0,0,pos_cords[1][r], :, :], cmap='gray');
+                ax[1][4].imshow(mri_noisy[0,0,:,pos_cords[2][r], :], cmap='gray');
+                ax[1][5].imshow(mri_noisy[0,0, :, :,pos_cords[3][r]], cmap='gray');
+
+                ax[2][0].imshow(mri_noisy_recon[0,0,pos_cords[1][r], :, :], cmap='gray');
+                ax[2][1].imshow(mri_noisy_recon[0,0,:,pos_cords[2][r], :], cmap='gray');
+                ax[2][2].imshow(mri_noisy_recon[0,0, :, :,pos_cords[3][r]], cmap='gray');
+
+                ax[2][3].imshow(mri_recon[0,0,pos_cords[1][r], :, :], cmap='gray');
+                ax[2][4].imshow(mri_recon[0,0,:,pos_cords[2][r], :], cmap='gray');
+                ax[2][5].imshow(mri_recon[0,0, :, :,pos_cords[3][r]], cmap='gray');
+                fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
+                plt.close("all");
+
+            counter += 1;
+            if counter >=5:
+                break;
+
+def train_miccai(model, train_loader, optimizer, scalar):
+    print(('\n' + '%10s'*3) %('Epoch', 'Loss', 'IoU'));
+    pbar = tqdm(enumerate(train_loader), total= len(train_loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+    epoch_loss = [];
+    epoch_IoU = [];
+    curr_step = 0;
+    curr_iou = 0;
+    for batch_idx, (batch) in pbar:
+        mri, mri_noisy, heatmap = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(dim=0)
+        steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
+        curr_loss = 0;
+        for s in range(steps):
+            curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
             assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
             with torch.cuda.amp.autocast_mode.autocast():
@@ -104,15 +279,25 @@ def train(model, train_loader, optimizer, scalar):
     return np.mean(epoch_loss);
 
 
-def valid(model, loader):
-    print(('\n' + '%10s'*2) %('Epoch', 'Loss'));
+def valid_miccai(model, loader):
+    print(('\n' + '%10s'*5) %('Epoch', 'Dice', 'Prec', 'Rec', 'F1'));
     pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
-    epoch_loss = [];
+    epoch_dice = [];
+    all_gt = [];
+    all_pred = [];
     with torch.no_grad():
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda')
+            mri, mri_noisy, heatmap, gt_lbl = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].numpy()[0];
             hm1 = model(mri, mri_noisy);
-            dice = dice_loss(hm1, heatmap);
+            pred_lbl = torch.sum(torch.sigmoid(hm1)>0.5).item()>0;
+            if gt_lbl == 1:
+                dice = dice_loss(hm1, heatmap);
+                epoch_dice.append(dice.item());
+            all_gt.append(gt_lbl);
+            all_pred.append(pred_lbl);
+
+            prec,rec,f1,_ = precision_recall_fscore_support(all_gt, all_pred, zero_division=0.0,average='binary');
+
 
             # #For regression
             # hm2 = model(mri_noisy, mri);
@@ -124,106 +309,10 @@ def valid(model, loader):
             # total_loss = lih1 + lih2 + lhh + lh1 + lh2;
             # #==============================================
 
-            epoch_loss.append(dice.item());
-            pbar.set_description(('%10s' + '%10.4g')%(epoch, np.mean(epoch_loss)));
+            
+            pbar.set_description(('%10s' + '%10.4g'*4)%(epoch, 0 if len(epoch_dice) == 0 else np.mean(epoch_dice), prec, rec, f1));
 
-    return np.mean(epoch_loss);
-
-def save_examples(model, loader,):
-    if os.path.exists('samples') is False:
-        os.makedirs('samples');
-    with torch.no_grad():
-        pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
-        counter = 0;
-        for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda');
-            hm1 = model(mri, mri_noisy);
-            hm2 = model(mri_noisy, mri);
-            heatmap = heatmap.detach().cpu().numpy();
-            hm1 = torch.sigmoid(hm1);
-            hm2 = torch.sigmoid(hm2);
-            hm1 = hm1.detach().cpu().numpy();
-            hm2 = hm2.detach().cpu().numpy();
-            mri = mri.detach().cpu().numpy();
-            mri_noisy = mri_noisy.detach().cpu().numpy();
-            for j in range(2):
-                #heatmap = (1-heatmap) > 0;
-                pos_cords = np.where(heatmap[0] >0);
-                if len(pos_cords[0]) != 0:
-                    r = np.random.randint(0,len(pos_cords[0]));
-                    center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
-                else:
-                    center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
-                fig, ax = plt.subplots(2,6);
-                ax[0][0].imshow(hm1[0,0,center[0], :, :], cmap='hot');
-                ax[0][1].imshow(hm1[0,0,:,center[1], :], cmap='hot');
-                ax[0][2].imshow(hm1[0,0, :, :,center[2]], cmap='hot');
-
-                ax[0][3].imshow(hm2[0,0,center[0], :, :], cmap='hot');
-                ax[0][4].imshow(hm2[0,0,:,center[1], :], cmap='hot');
-                ax[0][5].imshow(hm2[0,0, :, :,center[2]], cmap='hot');
-
-                ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
-                ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
-                ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
-
-                ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
-                ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
-                ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
-
-                fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
-                plt.close("all");
-
-            counter += 1;
-            if counter >=5:
-                break;
-
-            #for regression
-            # mri_recon = (mri_noisy+hm2);
-            # mri_noisy_recon = (mri+hm1);
-
-            # heatmap = heatmap.detach().cpu().numpy();
-            # hm1 = hm1.detach().cpu().numpy();
-            # hm2 = hm2.detach().cpu().numpy();
-            # mri_recon = mri_recon.detach().cpu().numpy();
-            # mri_noisy_recon = mri_noisy_recon.detach().cpu().numpy();
-            # mri = mri.detach().cpu().numpy();
-            # mri_noisy = mri_noisy.detach().cpu().numpy();
-            # for j in range(2):
-            #     heatmap = (1-heatmap) > 0;
-            #     pos_cords = np.where(heatmap[0] == 0);
-            #     r = np.random.randint(0, len(pos_cords[0]));
-            #     fig, ax = plt.subplots(3,6);
-            #     ax[0][0].imshow(hm1[0,0,pos_cords[1][r], :, :], cmap='hot');
-            #     ax[0][1].imshow(hm1[0,0,:,pos_cords[2][r], :], cmap='hot');
-            #     ax[0][2].imshow(hm1[0,0, :, :,pos_cords[3][r]], cmap='hot');
-
-            #     ax[0][3].imshow(hm2[0,0,pos_cords[1][r], :, :], cmap='hot');
-            #     ax[0][4].imshow(hm2[0,0,:,pos_cords[2][r], :], cmap='hot');
-            #     ax[0][5].imshow(hm2[0,0, :, :,pos_cords[3][r]], cmap='hot');
-
-            #     ax[1][0].imshow(mri[0,0,pos_cords[1][r], :, :], cmap='gray');
-            #     ax[1][1].imshow(mri[0,0,:,pos_cords[2][r], :], cmap='gray');
-            #     ax[1][2].imshow(mri[0,0, :, :,pos_cords[3][r]], cmap='gray');
-
-            #     ax[1][3].imshow(mri_noisy[0,0,pos_cords[1][r], :, :], cmap='gray');
-            #     ax[1][4].imshow(mri_noisy[0,0,:,pos_cords[2][r], :], cmap='gray');
-            #     ax[1][5].imshow(mri_noisy[0,0, :, :,pos_cords[3][r]], cmap='gray');
-
-            #     ax[2][0].imshow(mri_noisy_recon[0,0,pos_cords[1][r], :, :], cmap='gray');
-            #     ax[2][1].imshow(mri_noisy_recon[0,0,:,pos_cords[2][r], :], cmap='gray');
-            #     ax[2][2].imshow(mri_noisy_recon[0,0, :, :,pos_cords[3][r]], cmap='gray');
-
-            #     ax[2][3].imshow(mri_recon[0,0,pos_cords[1][r], :, :], cmap='gray');
-            #     ax[2][4].imshow(mri_recon[0,0,:,pos_cords[2][r], :], cmap='gray');
-            #     ax[2][5].imshow(mri_recon[0,0, :, :,pos_cords[3][r]], cmap='gray');
-            #     fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
-            #     plt.close("all");
-
-            # counter += 1;
-            # if counter >=5:
-            #     break;
-            #----------------------------------------
+    return np.mean(epoch_dice);
 
 def log_gradients_in_model(model, logger, step):
     for tag, value in model.named_parameters():
@@ -236,6 +325,8 @@ if __name__ == "__main__":
     #update_folds();
     #update_folds_isbi();
     #cache_mri_gradients();
+    #update_folds_miccai();
+
 
     RESUME = False;
     model = UNet3D(
@@ -267,15 +358,14 @@ if __name__ == "__main__":
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_loader = get_loader_isbi(0);
+    train_loader, test_loader = get_loader_miccai(0);
     sample_output_interval = 10;
     for epoch in range(start_epoch, 500):
-        save_examples(model, test_loader);
         model.train();
-        train_loss = train(model, train_loader, optimizer, scalar); 
+        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
         model.eval();
-        valid_loss = valid(model, test_loader);
+        valid_loss = valid_miccai(model, test_loader);
         summary_writer.add_scalar('train/loss', train_loss, epoch);
         summary_writer.add_scalar('valid/loss', valid_loss, epoch);
         if epoch %sample_output_interval == 0:

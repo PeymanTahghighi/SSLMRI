@@ -11,7 +11,7 @@ import config
 from sklearn.model_selection import train_test_split, KFold
 import nibabel as nib
 from skimage.filters import gaussian, sobel, threshold_otsu, try_all_threshold
-from monai.transforms import Compose, Resize, SpatialPadd, ScaleIntensityRange, Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise
+from monai.transforms import Compose, Resize, SpatialPadd, ScaleIntensityRange, Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise, RandSpatialCropSamplesd
 from scipy.ndimage import convolve
 from tqdm import tqdm
 import math
@@ -186,7 +186,6 @@ class MRI_Dataset(Dataset):
         else:
             ret = self.mr_images[index];
             return ret;
-
 
 class ISBI_Dataset(Dataset):
     def __init__(self, patient_ids, train = True) -> None:
@@ -386,6 +385,214 @@ class ISBI_Dataset(Dataset):
 
             return ret_mri1, ret_mri2, ret_gt;
 
+class MICCAI_Dataset(Dataset):
+    def __init__(self, patient_ids, train = True) -> None:
+        super().__init__();
+        m1 = 0.7;
+        m2 = 0.8;
+        self.augment_noisy_image = OneOf([
+            RandGaussianSmooth(prob=1.0, sigma_x=(m1,m2), sigma_y=(m1,m2), sigma_z=(m1,m2)),
+            RandGaussianNoise(prob=1.0,std=.1),
+            RandGibbsNoise(prob=1.0, alpha=(0.65,0.75))
+        ], weights=[1,1,1])
+
+
+        self.transforms = Compose(
+            [
+                
+                NormalizeIntensity(subtrahend=0.5, divisor=0.5)
+            ]
+        )
+        
+        self.crop_pos_neg = Compose(
+            [ 
+                SpatialPadd(keys=['image1', 'image2','mask'], spatial_size = [config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']]),
+                RandCropByPosNegLabeld(
+                keys=['image1', 'image2','mask'], 
+                label_key='mask', 
+                spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
+                pos=1, 
+                neg=0,
+                num_samples=config.hyperparameters['sample_per_mri'] if train else 1)
+            ]
+        )
+
+        self.crop_rand = Compose(
+            [ 
+                SpatialPadd(keys=['image1', 'image2','mask'], spatial_size = [config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']]),
+                RandSpatialCropSamplesd(
+                keys=['image1', 'image2','mask'], 
+                roi_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
+                num_samples=config.hyperparameters['sample_per_mri'] if train else 1,
+                random_center=False,
+                random_size=False)
+            ]
+        )
+
+        self.train = train;
+
+        self.data = [];
+        
+        if train:
+            for patient_path in patient_ids:
+                mri1 = nib.load(os.path.join(patient_path, f'flair_time01_on_middle_space.nii.gz'));
+                mri1 = mri1.get_fdata();
+                mri1 = window_center_adjustment(mri1);
+
+                mri2 = nib.load(os.path.join(patient_path, f'flair_time02_on_middle_space.nii.gz'));
+                mri2 = mri2.get_fdata();
+                mri2 = window_center_adjustment(mri2);
+
+                gt = nib.load(os.path.join(patient_path, f'ground_truth.nii.gz'));
+                gt = gt.get_fdata();
+                
+                self.data.append([mri1, mri2, gt]);
+        
+            
+        else:
+            for patient_path in patient_ids:
+                patient_id = patient_path[patient_path.rfind('/')+1:]
+                
+                curr_mri1 = [];
+                curr_mri2 = [];
+                curr_gt = [];
+                
+                mri1= nib.load(os.path.join(patient_path, f'flair_time01_on_middle_space.nii.gz'));
+                mri1 = mri1.get_fdata();
+                mri1 = window_center_adjustment(mri1);
+
+                mri2= nib.load(os.path.join(patient_path, f'flair_time02_on_middle_space.nii.gz'));
+                mri2 = mri2.get_fdata();
+                mri2 = window_center_adjustment(mri2);
+
+                gt = nib.load(os.path.join(patient_path, f'ground_truth.nii.gz'));
+                gt = gt.get_fdata();
+                lbl = np.sum(gt) > 0;
+
+
+                w,h,d = mri1.shape;
+                new_w = math.ceil(w / config.hyperparameters['crop_size_w']) * config.hyperparameters['crop_size_w'];
+                new_h = math.ceil(h / config.hyperparameters['crop_size_h']) * config.hyperparameters['crop_size_h'];
+                new_d = math.ceil(d / config.hyperparameters['crop_size_d']) * config.hyperparameters['crop_size_d'];
+
+                mri1_padded  = np.zeros((new_w, new_h, new_d), dtype = mri1.dtype);
+                mri2_padded  = np.zeros((new_w, new_h, new_d), dtype = mri2.dtype);
+                gt_padded  = np.zeros((new_w, new_h, new_d), dtype = gt.dtype);
+
+                mri1_padded[:w,:h,:d] = mri1;
+                mri2_padded[:w,:h,:d] = mri2;
+                gt_padded[:w,:h,:d] = gt;
+
+                step_w, step_h, step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
+                mri1_patches = patchify(mri1_padded, 
+                                                    (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                    (step_w, step_h, step_d));
+                mri2_patches = patchify(mri2_padded, 
+                                                    (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                    (step_w, step_h, step_d));
+                gt_patches = patchify(gt_padded, 
+                                                    (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                    (step_w, step_h, step_d));
+                mri1_patches = mri1_patches.reshape(mri1_patches.shape[0]*mri1_patches.shape[1]*mri1_patches.shape[2], mri1_patches.shape[3], mri1_patches.shape[4],mri1_patches.shape[5]);
+                mri2_patches = mri2_patches.reshape(mri2_patches.shape[0]*mri2_patches.shape[1]*mri2_patches.shape[2], mri2_patches.shape[3], mri2_patches.shape[4],mri2_patches.shape[5]);
+                gt_patches = gt_patches.reshape(gt_patches.shape[0]*gt_patches.shape[1]*gt_patches.shape[2], gt_patches.shape[3], gt_patches.shape[4],gt_patches.shape[5]);
+
+                curr_data = [(mri1_patches[i],mri2_patches[i],gt_patches[i], 0 if np.sum(gt_patches[i]) == 0 else 1) for i in range(mri1_patches.shape[0])];
+                curr_mri1.extend(mri1_patches);
+                curr_mri2.extend(mri2_patches);
+                curr_gt.extend(gt_patches);
+
+                self.data.extend(curr_data);
+
+            
+    
+    def __len__(self):
+        return len(self.data);
+
+    def __getitem__(self, index):
+        if self.train:
+            
+            mri1, mri2, gt = self.data[index];
+
+            mri1 = mri1 / (np.max(mri1)+1e-4);
+            mri2 = mri2 / (np.max(mri2)+1e-4);
+
+            mri1 = np.expand_dims(mri1, axis=0);
+            mri2 = np.expand_dims(mri2, axis=0);
+            gt = np.expand_dims(gt, axis=0);
+
+           # print(f'min: {np.min(gt)}\tmax: {np.max(gt)}');
+
+            if config.hyperparameters['deterministic'] is False:
+                if np.sum(gt) != 0:
+                    ret_transforms = self.crop_pos_neg({'image1': mri1, 'image2': mri2,'mask': gt});
+                else:
+                    ret_transforms = self.crop_rand({'image1': mri1, 'image2': mri2,'mask': gt});
+            
+            ret_mri1 = None;
+            ret_mri2 = None;
+            ret_gt = None;
+
+            for i in range(config.hyperparameters['sample_per_mri']):
+                if config.hyperparameters['deterministic'] is False:
+                    mri1_c = ret_transforms[i]['image1'];
+                    mri2_c = ret_transforms[i]['image2'];
+                    gt_c = ret_transforms[i]['mask'];
+                    #mrimage_noisy = copy(mri_c);
+                else:
+                    center = [68, 139, 83]
+                    mri_c = mri[:, int(center[0]-64):int(center[0]+64), int(center[1]-64):int(center[1]+64), int(center[2]-32):int(center[2]+32)];
+                    gt_c = gt[:, int(center[0]-64):int(center[0]+64), int(center[1]-64):int(center[1]+64), int(center[2]-32):int(center[2]+32)];
+                    mri_c = torch.from_numpy(mri_c);
+                    mrimage_noisy = copy(mri_c);
+
+                pos_cords = np.where(gt_c > 0);
+                if len(pos_cords[0]) != 0:
+                    r = np.random.randint(0,len(pos_cords[0]));
+                    center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+                else:
+                    center = [mri1_c.shape[0]//2, mri1_c.shape[1]//2, mri1_c.shape[2]//2]
+
+                
+
+                mri1_c = self.transforms(mri1_c);
+                mri2_c = self.transforms(mri2_c);
+
+                #visualize_2d([mri1_c, mri2_c, gt_c], center);
+                if ret_mri1 is None:
+                    ret_mri1 = mri1_c.unsqueeze(dim=0);
+                    ret_mri2 = mri2_c.unsqueeze(dim=0);
+                    ret_gt = gt_c.unsqueeze(dim=0);
+                else:
+                    ret_mri1 = torch.concat([ret_mri1, mri1_c.unsqueeze(dim=0)], dim=0);
+                    ret_mri2 = torch.concat([ret_mri2, mri2_c.unsqueeze(dim=0)], dim=0);
+                    ret_gt = torch.concat([ret_gt, gt_c.unsqueeze(dim=0)], dim=0);
+        
+            return ret_mri1, ret_mri2, ret_gt;
+       
+        else:
+            mri1, mri2, ret_gt, lbl = self.data[index];
+
+            mri1 = mri1 / (np.max(mri1)+1e-4);
+            mri2 = mri2 / (np.max(mri2)+1e-4);
+
+            mri1 = np.expand_dims(mri1, axis=0);
+            mri2 = np.expand_dims(mri2, axis=0);
+
+            ret_mri1 = self.transforms(mri1);
+            ret_mri2 = self.transforms(mri2);
+
+
+            # pos_cords = np.where(ret_gt == 1);
+            # if len(pos_cords[0]) != 0:
+            #     r = np.random.randint(0,len(pos_cords[0]));
+            #     center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+            # else:
+            #     center=[10,10,10]
+            # visualize_2d([ret_mri1, ret_mri2,ret_mri1 +gt1, ret_mri2 +gt2, ret_gt], center);
+
+            return ret_mri1, ret_mri2, ret_gt, lbl;
+
 def update_folds(num_test_data = 200):
     if os.path.exists('cache') is False:
         os.makedirs('cache');
@@ -427,6 +634,21 @@ def update_folds_isbi():
         pickle.dump([train_ids, test_ids], open(f'cache_isbi/{f}.fold', 'wb'));
         f+=1;
 
+def update_folds_miccai():
+    if os.path.exists('cache_miccai') is False:
+        os.makedirs('cache_miccai');
+
+    patient_ids = glob('miccai/*/');
+    patient_ids = np.array([p.replace('\\', '/')[:len(p)-1] for p in patient_ids])
+
+    kfold = KFold(5, random_state=42, shuffle=True);
+    f = 0;
+    for train_idx, test_idx in kfold.split(patient_ids):
+        train_ids, test_ids = patient_ids[train_idx], patient_ids[test_idx];
+
+        pickle.dump([train_ids, test_ids], open(f'cache_miccai/{f}.fold', 'wb'));
+        f+=1;
+
 def get_loader(fold):
     
     train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
@@ -449,6 +671,17 @@ def get_loader_isbi(fold):
     test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=8, pin_memory=True);
 
     return train_loader, test_loader;   
+
+def get_loader_miccai(fold):
+    
+    train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{fold}.fold'), 'rb'));
+
+    mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
+    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
+    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=8, pin_memory=True);
+
+    return train_loader, test_loader; 
 
 def standardize(img):
     img = img - np.min(img);
