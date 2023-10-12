@@ -755,9 +755,9 @@ def get_loader_miccai(fold):
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{fold}.fold'), 'rb'));
 
     mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=0, pin_memory=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
     mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=0, pin_memory=True);
+    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=8, pin_memory=True);
 
     return train_loader, test_loader; 
 
