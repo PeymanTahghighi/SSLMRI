@@ -187,6 +187,72 @@ class MRI_Dataset(Dataset):
             ret = self.mr_images[index];
             return ret;
 
+def cropper(mri1, mri2, gt, roi_size, num_samples):
+    ret = [];
+    for i in range(num_samples):
+        pos_cords = np.where(gt > 0);
+        r = np.random.randint(0,len(pos_cords[0]));
+        center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+        d_x_l = min(roi_size[0]//2,center[0]);
+        d_x_r = min(roi_size[0]//2 ,mri1.shape[1]-center[0]);
+        if d_x_l != roi_size[0]//2:
+            diff = abs(roi_size[0]//2 - center[0]);
+            d_x_r += diff;
+        if d_x_r != roi_size[0]//2 and d_x_l == roi_size[0]//2:
+            diff = abs(roi_size[0]//2 - (mri1.shape[1]-center[0]));
+            d_x_l += diff;
+        
+        d_y_l = min(roi_size[1]//2,center[1]);
+        d_y_r = min(roi_size[1]//2 ,mri1.shape[2]-center[1]);
+        if d_y_l != roi_size[1]//2:
+            diff = abs(roi_size[1]//2 - center[1]);
+            d_y_r += diff;
+        if d_y_r != roi_size[1]//2 and d_y_l == roi_size[1]//2:
+            diff = abs(roi_size[1]//2 - mri1.shape[2]-center[1]);
+            d_y_l += diff;
+        
+        d_z_l = min(roi_size[2]//2,center[2]);
+        d_z_r = min(roi_size[2]//2 ,mri1.shape[3]-center[2]);
+        if d_z_l != roi_size[2]//2:
+            diff = abs(roi_size[2]//2 - center[2]);
+            d_z_r += diff;
+        if d_z_r != roi_size[2]//2 and d_z_l == roi_size[2]//2:
+            diff = abs(roi_size[2]//2 - mri1.shape[3]-center[2]);
+            d_z_l += diff;
+
+        sign_x = np.random.randint(1,3);
+        if sign_x%2!=0:
+            offset_x = np.random.randint(0, max(min(abs(center[0]-int(d_x_l)), int(d_x_l//2)),1))*-1;
+        else:
+            offset_x = np.random.randint(0, max(min(abs(center[0]+int(d_x_r)-mri1.shape[1]), int(d_x_r//2)), 1));
+        start_x = center[0]-int(d_x_l)+offset_x;
+        end_x = center[0]+int(d_x_r)+offset_x;
+
+        sign_y = np.random.randint(1,3);
+        if sign_y%2!=0:
+            offset_y = np.random.randint(0, max(min(abs(center[1]-int(d_y_l)), int(d_y_l//2)),1))*-1;
+        else:
+            offset_y = np.random.randint(0, max(min(abs(center[1]+int(d_y_r)-mri1.shape[2]), int(d_y_r//2)), 1));
+        start_y = center[1]-int(d_y_l) + offset_y;
+        end_y = center[1]+int(d_y_r) + offset_y;
+
+        sign_z = np.random.randint(1,3);
+        if sign_z%2!=0:
+            offset_z = np.random.randint(0, max(min(abs(center[2]-int(d_z_l)), int(d_z_l)),1))*-1;
+        else:
+            offset_z = np.random.randint(0, max(min(abs(center[2]+int(d_z_r)-mri1.shape[3]), int(d_z_r//2)), 1));
+        
+        start_z = center[2]-int(d_z_l)+offset_z;
+        end_z = center[2]+int(d_z_r)+offset_z;
+
+        d = dict();
+        d['image1'] = mri1[:, start_x:end_x, start_y:end_y, start_z:end_z];
+        d['image2'] = mri2[:, start_x:end_x, start_y:end_y, start_z:end_z];
+        d['mask'] = torch.from_numpy(gt[:, start_x:end_x, start_y:end_y, start_z:end_z]);
+
+        ret.append(d);
+    return ret;
+
 class ISBI_Dataset(Dataset):
     def __init__(self, patient_ids, train = True) -> None:
         super().__init__();
@@ -420,12 +486,13 @@ class MICCAI_Dataset(Dataset):
         self.crop_rand = Compose(
             [ 
                 SpatialPadd(keys=['image1', 'image2','mask'], spatial_size = [config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']]),
-                RandSpatialCropSamplesd(
+                RandCropByPosNegLabeld(
                 keys=['image1', 'image2','mask'], 
-                roi_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
-                num_samples=config.hyperparameters['sample_per_mri'] if train else 1,
-                random_center=False,
-                random_size=False)
+                label_key='image1', 
+                spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
+                pos=1, 
+                neg=0,
+                num_samples=config.hyperparameters['sample_per_mri'] if train else 1)
             ]
         )
 
@@ -448,7 +515,6 @@ class MICCAI_Dataset(Dataset):
                 
                 self.data.append([mri1, mri2, gt]);
         
-            
         else:
             for patient_path in patient_ids:
                 patient_id = patient_path[patient_path.rfind('/')+1:]
@@ -467,7 +533,11 @@ class MICCAI_Dataset(Dataset):
 
                 gt = nib.load(os.path.join(patient_path, f'ground_truth.nii.gz'));
                 gt = gt.get_fdata();
-                lbl = np.sum(gt) > 0;
+
+                mask= nib.load(os.path.join(patient_path, f'brain_mask.nii.gz'));
+                mask = mask.get_fdata();
+
+                #visualize_2d([mri1,mri2, mask], [20, 20, 20]);
 
 
                 w,h,d = mri1.shape;
@@ -497,7 +567,11 @@ class MICCAI_Dataset(Dataset):
                 mri2_patches = mri2_patches.reshape(mri2_patches.shape[0]*mri2_patches.shape[1]*mri2_patches.shape[2], mri2_patches.shape[3], mri2_patches.shape[4],mri2_patches.shape[5]);
                 gt_patches = gt_patches.reshape(gt_patches.shape[0]*gt_patches.shape[1]*gt_patches.shape[2], gt_patches.shape[3], gt_patches.shape[4],gt_patches.shape[5]);
 
-                curr_data = [(mri1_patches[i],mri2_patches[i],gt_patches[i], 0 if np.sum(gt_patches[i]) == 0 else 1) for i in range(mri1_patches.shape[0])];
+                curr_data = [];
+                for i in range(mri1_patches.shape[0]):
+                    if np.sum(mri1_patches[i]) != 0 and np.sum(mri2_patches[i]) != 0:
+                        curr_data.append((mri1_patches[i],mri2_patches[i],gt_patches[i], 0 if np.sum(gt_patches[i]) == 0 else 1))
+
                 curr_mri1.extend(mri1_patches);
                 curr_mri2.extend(mri2_patches);
                 curr_gt.extend(gt_patches);
@@ -521,12 +595,16 @@ class MICCAI_Dataset(Dataset):
             mri2 = np.expand_dims(mri2, axis=0);
             gt = np.expand_dims(gt, axis=0);
 
-           # print(f'min: {np.min(gt)}\tmax: {np.max(gt)}');
-
             if config.hyperparameters['deterministic'] is False:
                 if np.sum(gt) != 0:
-                    ret_transforms = self.crop_pos_neg({'image1': mri1, 'image2': mri2,'mask': gt});
+
+                    ret_transforms = cropper(mri1, 
+                                             mri2, 
+                                             gt, 
+                                             roi_size=(config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
+                                             num_samples=config.hyperparameters['sample_per_mri'] if self.train else 1);
                 else:
+
                     ret_transforms = self.crop_rand({'image1': mri1, 'image2': mri2,'mask': gt});
             
             ret_mri1 = None;
@@ -583,13 +661,13 @@ class MICCAI_Dataset(Dataset):
             ret_mri2 = self.transforms(mri2);
 
 
-            # pos_cords = np.where(ret_gt == 1);
-            # if len(pos_cords[0]) != 0:
-            #     r = np.random.randint(0,len(pos_cords[0]));
-            #     center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
-            # else:
-            #     center=[10,10,10]
-            # visualize_2d([ret_mri1, ret_mri2,ret_mri1 +gt1, ret_mri2 +gt2, ret_gt], center);
+            pos_cords = np.where(ret_gt == 1);
+            if len(pos_cords[0]) != 0:
+                r = np.random.randint(0,len(pos_cords[0]));
+                center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+            else:
+                center=[10,10,10]
+            #visualize_2d([ret_mri1, ret_mri2, ret_gt], center);
 
             return ret_mri1, ret_mri2, ret_gt, lbl;
 
@@ -638,7 +716,7 @@ def update_folds_miccai():
     if os.path.exists('cache_miccai') is False:
         os.makedirs('cache_miccai');
 
-    patient_ids = glob('miccai/*/');
+    patient_ids = glob('miccai-processed/*/');
     patient_ids = np.array([p.replace('\\', '/')[:len(p)-1] for p in patient_ids])
 
     kfold = KFold(5, random_state=42, shuffle=True);
@@ -654,10 +732,10 @@ def get_loader(fold):
     train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
 
     mri_dataset_train = MRI_Dataset(train_mri);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=0, pin_memory=True);
     test_mri = glob(os.path.join('cache',f'{fold}','*.tstd'));
     mri_dataset_test = MRI_Dataset(test_mri, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=8, pin_memory=True);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
 
     return train_loader, test_loader;   
 
@@ -677,9 +755,9 @@ def get_loader_miccai(fold):
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{fold}.fold'), 'rb'));
 
     mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=0, pin_memory=True);
     mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=8, pin_memory=True);
+    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=0, pin_memory=True);
 
     return train_loader, test_loader; 
 

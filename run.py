@@ -249,15 +249,6 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 #lhh = dice_loss(hm1, hm2, sigmoid=True);
                 loss = (lhf1 + lhd1 + lhf2 + lhd2)/ config.hyperparameters['virtual_batch_size'];
 
-                #For regression
-                # lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
-                # lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
-                # lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
-                # lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
-                # lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
-                # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
-                #====================================================
-
             scalar.scale(loss).backward();
             curr_loss += loss.item();
             curr_step+=1;
@@ -325,7 +316,7 @@ if __name__ == "__main__":
     #update_folds();
     #update_folds_isbi();
     #cache_mri_gradients();
-    #update_folds_miccai();
+    update_folds_miccai();
 
 
     RESUME = False;
@@ -361,6 +352,7 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loader_miccai(0);
     sample_output_interval = 10;
     for epoch in range(start_epoch, 500):
+        save_examples_miccai(model, test_loader);
         model.train();
         train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
@@ -370,7 +362,7 @@ if __name__ == "__main__":
         summary_writer.add_scalar('valid/loss', valid_loss, epoch);
         if epoch %sample_output_interval == 0:
             print('sampling outputs...');
-            save_examples(model, test_loader);
+            save_examples_miccai(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
