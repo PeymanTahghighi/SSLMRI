@@ -243,7 +243,6 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
                 lhf1 = DiceFocalLoss(sigmoid=True)(hm1, curr_heatmap);
-                lhd1 = DiceLoss()(hm1, curr_heatmap);
                 lhf2 = DiceFocalLoss(sigmoid=True)(hm2, curr_heatmap);
                # lhd2 = dice_loss(hm2, curr_heatmap);
                 #lhh = dice_loss(hm1, hm2, sigmoid=True);
@@ -252,7 +251,8 @@ def train_miccai(model, train_loader, optimizer, scalar):
             scalar.scale(loss).backward();
             curr_loss += loss.item();
             curr_step+=1;
-            curr_iou += (1-lhd1.item());
+            #lhd1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
+            curr_iou += (1-(DiceLoss(sigmoid=True)(hm1, curr_heatmap)).item());
 
             if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
                 scalar.step(optimizer);
@@ -282,7 +282,7 @@ def valid_miccai(model, loader):
             hm1 = model(mri, mri_noisy);
             pred_lbl = torch.sum(torch.sigmoid(hm1)>0.5).item()>0;
             if gt_lbl == 1:
-                dice = DiceLoss()(hm1, heatmap);
+                dice = DiceLoss(sigmoid=True)(hm1, heatmap);
                 epoch_dice.append(dice.item());
             all_gt.append(gt_lbl);
             all_pred.append(pred_lbl);
