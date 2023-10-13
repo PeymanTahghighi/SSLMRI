@@ -5,7 +5,7 @@ hyperparameters = {
     'crop_size_w': 96,
     'crop_size_h': 96,
     'crop_size_d':96,
-    'learning_rate':1e-3,
+    'learning_rate':1e-4,
     'sample_per_mri':4,
     'deterministic':False,
     'virtual_batch_size':1

@@ -15,7 +15,7 @@ from utility import IoU
 import torch.nn.functional as F
 from torchvision.ops.focal_loss import sigmoid_focal_loss
 from sklearn.metrics import precision_recall_fscore_support
-
+from monai.losses.dice import DiceLoss, DiceFocalLoss
 #===============================================================
 def dice_loss(input, 
                 target, 
@@ -34,15 +34,15 @@ def dice_loss(input,
             "input and target must be in the same device. Got: {}" .format(
                 input.device, target.device))
     # compute softmax over the classes axis
-    input_soft = torch.sigmoid(input)
+    #input_soft = torch.sigmoid(input)
     if sigmoid is True:
         target = torch.sigmoid(target);
 
 
     # compute the actual dice score
     dims = (1, 2, 3, 4)
-    intersection = torch.sum(input_soft * target, dims)
-    cardinality = torch.sum(input_soft + target, dims)
+    intersection = torch.sum(input * target, dims)
+    cardinality = torch.sum(input + target, dims)
 
     dice_score = 2. * intersection / (cardinality + 1e-4)
     return torch.mean(1. - dice_score)
@@ -242,12 +242,12 @@ def train_miccai(model, train_loader, optimizer, scalar):
             with torch.cuda.amp.autocast_mode.autocast():
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = sigmoid_focal_loss(hm1.squeeze(dim=1), curr_heatmap.squeeze(dim=1).float(), reduction="mean");
-                lhd1 = dice_loss(hm1, curr_heatmap);
-                lhf2 = sigmoid_focal_loss(hm2.squeeze(dim=1), curr_heatmap.squeeze(dim=1).float(), reduction="mean");
-                lhd2 = dice_loss(hm2, curr_heatmap);
+                lhf1 = DiceFocalLoss(sigmoid=True)(hm1, curr_heatmap);
+                lhd1 = DiceLoss()(hm1, curr_heatmap);
+                lhf2 = DiceFocalLoss(sigmoid=True)(hm2, curr_heatmap);
+               # lhd2 = dice_loss(hm2, curr_heatmap);
                 #lhh = dice_loss(hm1, hm2, sigmoid=True);
-                loss = (lhf1 + lhd1 + lhf2 + lhd2)/ config.hyperparameters['virtual_batch_size'];
+                loss = (lhf1 + lhf2)/ config.hyperparameters['virtual_batch_size'];
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
@@ -282,7 +282,7 @@ def valid_miccai(model, loader):
             hm1 = model(mri, mri_noisy);
             pred_lbl = torch.sum(torch.sigmoid(hm1)>0.5).item()>0;
             if gt_lbl == 1:
-                dice = dice_loss(hm1, heatmap);
+                dice = DiceLoss()(hm1, heatmap);
                 epoch_dice.append(dice.item());
             all_gt.append(gt_lbl);
             all_pred.append(pred_lbl);
@@ -316,7 +316,7 @@ if __name__ == "__main__":
     #update_folds();
     #update_folds_isbi();
     #cache_mri_gradients();
-    update_folds_miccai();
+    #update_folds_miccai();
 
 
     RESUME = False;
