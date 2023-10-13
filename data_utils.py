@@ -656,6 +656,7 @@ class MICCAI_Dataset(Dataset):
 
             mri1 = np.expand_dims(mri1, axis=0);
             mri2 = np.expand_dims(mri2, axis=0);
+            ret_gt = np.expand_dims(ret_gt, axis=0);
 
             ret_mri1 = self.transforms(mri1);
             ret_mri2 = self.transforms(mri2);
