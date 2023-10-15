@@ -245,8 +245,8 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 lhf1 = DiceFocalLoss(sigmoid=True)(hm1, curr_heatmap);
                 lhf2 = DiceFocalLoss(sigmoid=True)(hm2, curr_heatmap);
                # lhd2 = dice_loss(hm2, curr_heatmap);
-                #lhh = dice_loss(hm1, hm2, sigmoid=True);
-                loss = (lhf1 + lhf2)/ config.hyperparameters['virtual_batch_size'];
+                lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
+                loss = (lhf1 + lhf2 + lhh)/ config.hyperparameters['virtual_batch_size'];
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
@@ -337,14 +337,14 @@ if __name__ == "__main__":
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
     optimizer = optim.Adam(model.parameters(), lr = config.hyperparameters['learning_rate']);
 
-    lr_scheduler = CosineAnnealingLR(optimizer, T_max=500, eta_min= 1e-6);
+    #lr_scheduler = CosineAnnealingLR(optimizer, T_max=500, eta_min= 1e-6);
     summary_writer = SummaryWriter(os.path.join('exp', 'Unet3D-crossatten'));
     best_loss = 100;
     start_epoch = 0;
 
     if RESUME is True:
         optimizer.load_state_dict(ckpt['optimizer']);
-        lr_scheduler.load_state_dict(ckpt['scheduler']);
+        #lr_scheduler.load_state_dict(ckpt['scheduler']);
         best_loss = ckpt['best_loss'];
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
@@ -365,12 +365,12 @@ if __name__ == "__main__":
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
-            'scheduler': lr_scheduler.state_dict(),
+            #'scheduler': lr_scheduler.state_dict(),
             'best_loss': best_loss,
             'epoch': epoch+1
         }
         torch.save(ckpt,'resume.ckpt');
-        lr_scheduler.step();
+        #lr_scheduler.step();
 
         if best_loss > valid_loss:
             print(f'new best model found: {valid_loss}')
