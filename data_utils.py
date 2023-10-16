@@ -473,8 +473,8 @@ class MICCAI_Dataset(Dataset):
             [ 
                 SpatialPadd(keys=['image1', 'image2','mask'], spatial_size = [config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']]),
                 RandCropByPosNegLabeld(
-                keys=['image1', 'image2','mask'], 
-                label_key='image1', 
+                keys=['image1', 'image2', 'mask', 'lbl'], 
+                label_key='lbl', 
                 spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
                 pos=1, 
                 neg=0,
@@ -530,6 +530,9 @@ class MICCAI_Dataset(Dataset):
 
                 gt = gt * brainmask;
 
+                mri1 = mri1 / (np.max(mri1)+1e-4);
+                mri2 = mri2 / (np.max(mri2)+1e-4);
+
                 #visualize_2d([mri1,mri2, mask], [20, 20, 20]);
 
 
@@ -581,13 +584,12 @@ class MICCAI_Dataset(Dataset):
             
             mri1, mri2, gt, pp = self.data[index];
 
-            print(f'{pp}: {np.sum(gt)}');
-
-            
-
             mri1 = np.expand_dims(mri1, axis=0);
             mri2 = np.expand_dims(mri2, axis=0);
             gt = np.expand_dims(gt, axis=0);
+
+            mri1 = mri1 / (np.max(mri1)+1e-4);
+            mri2 = mri2 / (np.max(mri2)+1e-4);
 
             if config.hyperparameters['deterministic'] is False:
                 if np.sum(gt) != 0:
@@ -599,7 +601,7 @@ class MICCAI_Dataset(Dataset):
                                              num_samples=config.hyperparameters['sample_per_mri'] if self.train else 1);
                 else:
 
-                    ret_transforms = self.crop_rand({'image1': mri1, 'image2': mri2,'mask': gt});
+                    ret_transforms = self.crop_rand({'image1': mri1, 'image2': mri2,'mask': gt, 'lbl' :np.ones_like(mri1)});
             
             ret_mri1 = None;
             ret_mri2 = None;
@@ -611,8 +613,7 @@ class MICCAI_Dataset(Dataset):
                     mri2_c = ret_transforms[i]['image2'];
                     gt_c = ret_transforms[i]['mask'];
                 
-                    mri1_c = mri1_c / (torch.max(mri1_c)+1e-4);
-                    mri2_c = mri2_c / (torch.max(mri2_c)+1e-4);
+                    
                     #mrimage_noisy = copy(mri_c);
                 else:
                     center = [68, 139, 83]
@@ -636,8 +637,10 @@ class MICCAI_Dataset(Dataset):
                 mri1_c = self.transforms(mri1_c);
                 mri2_c = self.transforms(mri2_c);
 
-                total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
+                total_heatmap_thresh = torch.where(total_heatmap > 0.9, 1.0, 0.0);
                 total_heatmap_thresh += gt_c;
+
+                total_heatmap_thresh = torch.where(total_heatmap_thresh>0, 0, 1);
                 # pos_cords = np.where(total_heatmap_thresh == 1);
                 # r = np.random.randint(0,len(pos_cords[0]));
                 # center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
@@ -657,9 +660,6 @@ class MICCAI_Dataset(Dataset):
         else:
             mri1, mri2, ret_gt, lbl = self.data[index];
 
-            mri1 = mri1 / (np.max(mri1)+1e-4);
-            mri2 = mri2 / (np.max(mri2)+1e-4);
-
             mri1 = np.expand_dims(mri1, axis=0);
             mri2 = np.expand_dims(mri2, axis=0);
             ret_gt = np.expand_dims(ret_gt, axis=0);
@@ -673,8 +673,10 @@ class MICCAI_Dataset(Dataset):
             #     r = np.random.randint(0,len(pos_cords[0]));
             #     center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
             # else:
-            #     center=[10,10,10]
+            #     center=[mri1.shape[1]//2, mri1.shape[2]//2, mri1.shape[3]//2]
             # visualize_2d([ret_mri1, ret_mri2, ret_gt], center);
+
+            ret_gt = np.where(ret_gt>0, 0, 1);
 
             return ret_mri1, ret_mri2, ret_gt, lbl;
 
