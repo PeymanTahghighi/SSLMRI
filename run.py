@@ -318,7 +318,7 @@ def valid_miccai(model, loader):
             
             pbar.set_description(('%10s' + '%10.4g'*1)%(epoch, np.mean(total_loss)));
 
-    return np.mean(epoch_dice);
+    return np.mean(total_loss);
 
 def log_gradients_in_model(model, logger, step):
     for tag, value in model.named_parameters():
