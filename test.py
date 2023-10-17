@@ -517,31 +517,31 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
             fixed_image_nib = nib.load(fixed_path)
             moving_image_nib = nib.load(moving_path)
 
-            moving_image_nib = nib.as_closest_canonical(moving_image_nib);
-            fixed_image_nib = nib.as_closest_canonical(fixed_image_nib);
+            #moving_image_nib = nib.as_closest_canonical(moving_image_nib);
+            #fixed_image_nib = nib.as_closest_canonical(fixed_image_nib);
 
             fixed_image_data = fixed_image_nib.get_fdata()
             moving_image_data = moving_image_nib.get_fdata()
 
-            target_spacing = (1.0, 1.0, 1.0)
+            #target_spacing = (1.0, 1.0, 1.0)
 
-            fixed_image_data = load_and_resample_nii_image(fixed_image_nib, fixed_image_data, target_spacing)
-            moving_image_data = load_and_resample_nii_image(moving_image_nib, moving_image_data, target_spacing)
+            #fixed_image_data = load_and_resample_nii_image(fixed_image_nib, fixed_image_data, target_spacing)
+            #moving_image_data = load_and_resample_nii_image(moving_image_nib, moving_image_data, target_spacing)
 
-            fixed_sitk = sitk.GetImageFromArray(fixed_image_data)
-            moving_sitk = sitk.GetImageFromArray(moving_image_data)
+            #fixed_sitk = sitk.GetImageFromArray(fixed_image_data)
+            #moving_sitk = sitk.GetImageFromArray(moving_image_data)
 
             # We perform the histogram matching
-            matched_moving_sitk = histogram_match(moving_sitk, fixed_sitk)
+            #matched_moving_sitk = histogram_match(moving_sitk, fixed_sitk)
 
             # We convert the matched image back to numpy array
-            matched_moving_image_data = sitk.GetArrayFromImage(matched_moving_sitk)
+            # matched_moving_image_data = sitk.GetArrayFromImage(matched_moving_sitk)
 
-            rigid_registered_image, rigid_transform = rigid_registration(fixed_sitk, matched_moving_sitk)
-            rigid_registered_image_data = sitk.GetArrayFromImage(rigid_registered_image)
+            # rigid_registered_image, rigid_transform = rigid_registration(fixed_sitk, matched_moving_sitk)
+            # rigid_registered_image_data = sitk.GetArrayFromImage(rigid_registered_image)
 
             fixed_image_data = window_center_adjustment(fixed_image_data);
-            rigid_registered_image_data = window_center_adjustment(rigid_registered_image_data);
+            rigid_registered_image_data = window_center_adjustment(moving_image_data);
 
             fixed_image_data, fixed_image_data_mask = preprocess(fixed_image_data);
             rigid_registered_image_data, rigid_registered_image_data_mask = preprocess(rigid_registered_image_data);
@@ -588,8 +588,6 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
                         #mri_mask, mri_noisy_mask = fixed_image_data_mask_trans.to('cuda'), rigid_registered_image_data_mask_trans.to('cuda');
                         hm1 = model(mri, mri_noisy);
                         hm2 = model(mri_noisy, mri);
-                        hm1 = hm1 *2.0;
-                        hm2 = hm2 *2.0;
 
                         mri_recon = (mri_noisy+hm2);
                         mri_noisy_recon = (mri+hm1);
@@ -609,7 +607,9 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
                         mri = normalize(mri);
 
                         hm1_positive_thresh = (hm1 > 0.1);
+                        print(np.sum(hm1_positive_thresh));
                         hm1_negative_thresh = (hm1 < -0.1);
+                        print(np.sum(hm1_negative_thresh));
                         hm_thresh = np.clip(hm1_negative_thresh+hm1_positive_thresh, 0, 1);
                         hm1_color_positive = hm1_color * np.expand_dims(hm1_positive_thresh,axis=-1);
                         hm1_color_positive = hm1_color_positive[:,:,:,:3];
@@ -830,13 +830,13 @@ if __name__ == "__main__":
             num_res_units=2,
             );
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load('best_model-linear.ckpt');
+    ckpt = torch.load('best_model-miccai.ckpt');
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 
-    predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
-    # predict_on_lesjak('C:\\PhD\\open_ms_data-master\\longitudinal\\coregistered\\patient01\\study1_T1W.nii.gz',
-    #                    'C:\\PhD\\open_ms_data-master\\longitudinal\\coregistered\\patient01\\study2_T1W.nii.gz', model, use_cached=False);
+    #predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
+    predict_on_lesjak('miccai-processed\\013\\flair_time01_on_middle_space.nii.gz',
+                       'miccai-processed\\013\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
 
     # train_loader, test_loader = get_loader();
     

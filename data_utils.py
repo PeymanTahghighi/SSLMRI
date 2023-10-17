@@ -634,13 +634,15 @@ class MICCAI_Dataset(Dataset):
                 for i in range(3):
                     mri2_c, heatmap, noise, center = add_synthetic_lesion_wm(mri2_c, g)
                     total_heatmap += heatmap;
+                
                 mri1_c = self.transforms(mri1_c);
+
+                mri2_c = self.augment_noisy_image(mri2_c);
                 mri2_c = self.transforms(mri2_c);
 
-                total_heatmap_thresh = torch.where(total_heatmap > 0.9, 1.0, 0.0);
+                total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
                 total_heatmap_thresh += gt_c;
 
-                total_heatmap_thresh = torch.where(total_heatmap_thresh>0, 0, 1);
                 # pos_cords = np.where(total_heatmap_thresh == 1);
                 # r = np.random.randint(0,len(pos_cords[0]));
                 # center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
@@ -675,8 +677,6 @@ class MICCAI_Dataset(Dataset):
             # else:
             #     center=[mri1.shape[1]//2, mri1.shape[2]//2, mri1.shape[3]//2]
             # visualize_2d([ret_mri1, ret_mri2, ret_gt], center);
-
-            ret_gt = np.where(ret_gt>0, 0, 1);
 
             return ret_mri1, ret_mri2, ret_gt, lbl;
 
