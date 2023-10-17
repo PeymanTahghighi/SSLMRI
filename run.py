@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from torchvision.ops.focal_loss import sigmoid_focal_loss
 from sklearn.metrics import precision_recall_fscore_support
 from monai.losses.dice import DiceLoss, DiceFocalLoss
+from skimage.filters import threshold_otsu
 #===============================================================
 def dice_loss(input, 
                 target, 
@@ -290,11 +291,14 @@ def valid_miccai(model, loader):
     all_pred = [];
     with torch.no_grad():
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap, gt_lbl = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].numpy()[0];
+            mri, mri_noisy, heatmap, gt_lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].numpy()[0], batch[4].to('cuda');
 
             hm1 = model(mri, mri_noisy);
-            #hm2 = model(mri_noisy, mri);
-            pred_lbl = torch.sum(torch.sigmoid(hm1)>0.5).item()>0;
+            hm2 = model(mri_noisy, mri);
+            pred_lbl_1 = torch.sigmoid(hm1)>0.5;
+            pred_lbl_2 = torch.sigmoid(hm2)>0.5;
+            pred = pred_lbl_1 * pred_lbl_2 * brainmask;
+            pred_lbl = torch.sum(pred).item()>0;
             if gt_lbl == 1:
                 dice = DiceLoss(sigmoid=True)(hm1, heatmap);
                 epoch_dice.append(dice.item());

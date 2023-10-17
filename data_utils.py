@@ -509,11 +509,7 @@ class MICCAI_Dataset(Dataset):
         else:
             for patient_path in patient_ids:
                 patient_id = patient_path[patient_path.rfind('/')+1:]
-                
-                curr_mri1 = [];
-                curr_mri2 = [];
-                curr_gt = [];
-                
+                                
                 mri1= nib.load(os.path.join(patient_path, f'flair_time01_on_middle_space.nii.gz'));
                 mri1 = mri1.get_fdata();
                 mri1 = window_center_adjustment(mri1);
@@ -527,8 +523,10 @@ class MICCAI_Dataset(Dataset):
 
                 brainmask = nib.load(os.path.join(patient_path, f'brain_mask.nii.gz'));
                 brainmask = brainmask.get_fdata();
+                n = np.max(brainmask);
 
                 gt = gt * brainmask;
+
 
                 mri1 = mri1 / (np.max(mri1)+1e-4);
                 mri2 = mri2 / (np.max(mri2)+1e-4);
@@ -544,10 +542,12 @@ class MICCAI_Dataset(Dataset):
                 mri1_padded  = np.zeros((new_w, new_h, new_d), dtype = mri1.dtype);
                 mri2_padded  = np.zeros((new_w, new_h, new_d), dtype = mri2.dtype);
                 gt_padded  = np.zeros((new_w, new_h, new_d), dtype = gt.dtype);
+                brainmask_padded  = np.zeros((new_w, new_h, new_d), dtype = brainmask.dtype);
 
                 mri1_padded[:w,:h,:d] = mri1;
                 mri2_padded[:w,:h,:d] = mri2;
                 gt_padded[:w,:h,:d] = gt;
+                brainmask_padded[:w,:h,:d] = brainmask;
 
                 step_w, step_h, step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
                 mri1_patches = patchify(mri1_padded, 
@@ -559,18 +559,18 @@ class MICCAI_Dataset(Dataset):
                 gt_patches = patchify(gt_padded, 
                                                     (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                     (step_w, step_h, step_d));
+                brainmask_patches = patchify(brainmask_padded, 
+                                                    (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                    (step_w, step_h, step_d));
                 mri1_patches = mri1_patches.reshape(mri1_patches.shape[0]*mri1_patches.shape[1]*mri1_patches.shape[2], mri1_patches.shape[3], mri1_patches.shape[4],mri1_patches.shape[5]);
                 mri2_patches = mri2_patches.reshape(mri2_patches.shape[0]*mri2_patches.shape[1]*mri2_patches.shape[2], mri2_patches.shape[3], mri2_patches.shape[4],mri2_patches.shape[5]);
                 gt_patches = gt_patches.reshape(gt_patches.shape[0]*gt_patches.shape[1]*gt_patches.shape[2], gt_patches.shape[3], gt_patches.shape[4],gt_patches.shape[5]);
+                brainmask_patches = brainmask_patches.reshape(brainmask_patches.shape[0]*brainmask_patches.shape[1]*brainmask_patches.shape[2], brainmask_patches.shape[3], brainmask_patches.shape[4],brainmask_patches.shape[5]);
 
                 curr_data = [];
                 for i in range(mri1_patches.shape[0]):
                     if np.sum(mri1_patches[i]) != 0 and np.sum(mri2_patches[i]) != 0:
-                        curr_data.append((mri1_patches[i],mri2_patches[i],gt_patches[i], 0 if np.sum(gt_patches[i]) == 0 else 1))
-
-                curr_mri1.extend(mri1_patches);
-                curr_mri2.extend(mri2_patches);
-                curr_gt.extend(gt_patches);
+                        curr_data.append((mri1_patches[i],mri2_patches[i],gt_patches[i], 0 if np.sum(gt_patches[i]) == 0 else 1, brainmask_patches[i]))
 
                 self.data.extend(curr_data);
 
@@ -616,11 +616,10 @@ class MICCAI_Dataset(Dataset):
                     
                     #mrimage_noisy = copy(mri_c);
                 else:
-                    center = [68, 139, 83]
-                    mri_c = mri[:, int(center[0]-64):int(center[0]+64), int(center[1]-64):int(center[1]+64), int(center[2]-32):int(center[2]+32)];
-                    gt_c = gt[:, int(center[0]-64):int(center[0]+64), int(center[1]-64):int(center[1]+64), int(center[2]-32):int(center[2]+32)];
-                    mri_c = torch.from_numpy(mri_c);
-                    mrimage_noisy = copy(mri_c);
+                    center = [int(mri1.shape[1]//2),int(mri1.shape[2]//2), int(mri1.shape[3]//2)]
+                    mri1_c = torch.from_numpy(mri1[:, int(center[0]-64):int(center[0]+64), int(center[1]-64):int(center[1]+64), int(center[2]-32):int(center[2]+32)]);
+                    mri2_c = torch.from_numpy(mri2[:, int(center[0]-64):int(center[0]+64), int(center[1]-64):int(center[1]+64), int(center[2]-32):int(center[2]+32)]);
+                    gt_c = torch.from_numpy(gt[:, int(center[0]-64):int(center[0]+64), int(center[1]-64):int(center[1]+64), int(center[2]-32):int(center[2]+32)]);
 
                 pos_cords = np.where(gt_c > 0);
                 if len(pos_cords[0]) != 0:
@@ -640,14 +639,14 @@ class MICCAI_Dataset(Dataset):
                 mri2_c = self.augment_noisy_image(mri2_c);
                 mri2_c = self.transforms(mri2_c);
 
-                total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
+                total_heatmap_thresh = torch.where(total_heatmap > 0.9, 1.0, 0.0);
                 total_heatmap_thresh += gt_c;
 
-                # pos_cords = np.where(total_heatmap_thresh == 1);
-                # r = np.random.randint(0,len(pos_cords[0]));
-                # center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+                pos_cords = np.where(total_heatmap_thresh == 1);
+                r = np.random.randint(0,len(pos_cords[0]));
+                center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
 
-                # visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, g], center);
+                visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, g], center);
                 if ret_mri1 is None:
                     ret_mri1 = mri1_c.unsqueeze(dim=0);
                     ret_mri2 = mri2_c.unsqueeze(dim=0);
@@ -660,7 +659,7 @@ class MICCAI_Dataset(Dataset):
             return ret_mri1, ret_mri2, ret_gt;
        
         else:
-            mri1, mri2, ret_gt, lbl = self.data[index];
+            mri1, mri2, ret_gt, lbl, brainmask = self.data[index];
 
             mri1 = np.expand_dims(mri1, axis=0);
             mri2 = np.expand_dims(mri2, axis=0);
@@ -670,15 +669,15 @@ class MICCAI_Dataset(Dataset):
             ret_mri2 = self.transforms(mri2);
 
 
-            # pos_cords = np.where(ret_gt == 1);
-            # if len(pos_cords[0]) != 0:
-            #     r = np.random.randint(0,len(pos_cords[0]));
-            #     center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
-            # else:
-            #     center=[mri1.shape[1]//2, mri1.shape[2]//2, mri1.shape[3]//2]
-            # visualize_2d([ret_mri1, ret_mri2, ret_gt], center);
+            pos_cords = np.where(ret_gt == 1);
+            if len(pos_cords[0]) != 0:
+                r = np.random.randint(0,len(pos_cords[0]));
+                center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+            else:
+                center=[mri1.shape[1]//2, mri1.shape[2]//2, mri1.shape[3]//2]
+            visualize_2d([ret_mri1, ret_mri2, ret_gt, brainmask], center);
 
-            return ret_mri1, ret_mri2, ret_gt, lbl;
+            return ret_mri1, ret_mri2, ret_gt, lbl, brainmask;
 
 def update_folds(num_test_data = 200):
     if os.path.exists('cache') is False:
@@ -844,9 +843,9 @@ def add_synthetic_lesion_wm(img, mask_g):
     _,h,w,d = mri.shape;
 
     mask_cpy = deepcopy(mask_g);
-    size_x = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 15;
-    size_y = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 15;
-    size_z = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 15;
+    size_x = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
+    size_y = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
+    size_z = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
     mask_cpy[:,:,:,d-size_z:] = 0;
     mask_cpy[:,:,:,:size_z+1] = 0;
     mask_cpy[:,:,w-size_y:,:] = 0;
