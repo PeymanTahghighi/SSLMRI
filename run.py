@@ -366,7 +366,6 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loader_miccai(0);
     sample_output_interval = 10;
     for epoch in range(start_epoch, 500):
-        save_examples_miccai(model, test_loader);
         model.train();
         train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
