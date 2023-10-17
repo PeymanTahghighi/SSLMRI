@@ -630,7 +630,8 @@ class MICCAI_Dataset(Dataset):
 
                 total_heatmap = torch.zeros_like(mri2_c, dtype=torch.float64);
                 g = (mri2_c > threshold_otsu(mri2_c.numpy())) *  torch.where(mri2_c<0.8, 1.0, 0.0);
-                for i in range(3):
+                num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
+                for i in range(num_corrupted_patches):
                     mri2_c, heatmap, noise, center = add_synthetic_lesion_wm(mri2_c, g)
                     total_heatmap += heatmap;
                 
@@ -639,14 +640,14 @@ class MICCAI_Dataset(Dataset):
                 mri2_c = self.augment_noisy_image(mri2_c);
                 mri2_c = self.transforms(mri2_c);
 
-                total_heatmap_thresh = torch.where(total_heatmap > 0.9, 1.0, 0.0);
+                total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
                 total_heatmap_thresh += gt_c;
 
-                pos_cords = np.where(total_heatmap_thresh == 1);
-                r = np.random.randint(0,len(pos_cords[0]));
-                center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+                # pos_cords = np.where(total_heatmap_thresh == 1);
+                # r = np.random.randint(0,len(pos_cords[0]));
+                # center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
 
-                visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, g], center);
+                # visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, g], center);
                 if ret_mri1 is None:
                     ret_mri1 = mri1_c.unsqueeze(dim=0);
                     ret_mri2 = mri2_c.unsqueeze(dim=0);
@@ -669,13 +670,13 @@ class MICCAI_Dataset(Dataset):
             ret_mri2 = self.transforms(mri2);
 
 
-            pos_cords = np.where(ret_gt == 1);
-            if len(pos_cords[0]) != 0:
-                r = np.random.randint(0,len(pos_cords[0]));
-                center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
-            else:
-                center=[mri1.shape[1]//2, mri1.shape[2]//2, mri1.shape[3]//2]
-            visualize_2d([ret_mri1, ret_mri2, ret_gt, brainmask], center);
+            # pos_cords = np.where(ret_gt == 1);
+            # if len(pos_cords[0]) != 0:
+            #     r = np.random.randint(0,len(pos_cords[0]));
+            #     center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+            # else:
+            #     center=[mri1.shape[1]//2, mri1.shape[2]//2, mri1.shape[3]//2]
+            # visualize_2d([ret_mri1, ret_mri2, ret_gt, brainmask], center);
 
             return ret_mri1, ret_mri2, ret_gt, lbl, brainmask;
 
