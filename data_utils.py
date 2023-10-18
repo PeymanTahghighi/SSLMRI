@@ -173,7 +173,7 @@ class MRI_Dataset(Dataset):
             ret = self.mr_images[index];
             return ret;
 
-def cropper(mri1, mri2, gt, roi_size, num_samples):
+def cropper(mri1, mri2, gt, gr, roi_size, num_samples):
     ret = [];
     curr_pos = True;
     for i in range(num_samples):
@@ -237,16 +237,17 @@ def cropper(mri1, mri2, gt, roi_size, num_samples):
             d['image1'] = torch.from_numpy(mri1[:, start_x:end_x, start_y:end_y, start_z:end_z]);
             d['image2'] = torch.from_numpy(mri2[:, start_x:end_x, start_y:end_y, start_z:end_z]);
             d['mask'] = torch.from_numpy(gt[:, start_x:end_x, start_y:end_y, start_z:end_z]);
+            d['gradient'] = torch.from_numpy(gr[:,start_x:end_x, start_y:end_y, start_z:end_z]);
 
             ret.append(d);
         else:
             d = RandCropByPosNegLabeld(
-                keys=['image1', 'image2','mask'], 
+                keys=['image1', 'image2','mask', 'gradient'], 
                 label_key='mask', 
                 spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
                 pos=0, 
                 neg=1,
-                num_samples=1)({'image1': mri1, 'image2': mri2,'mask': gt})[0];
+                num_samples=1)({'image1': mri1, 'image2': mri2,'mask': gt, 'gradient': gr})[0];
 
             ret.append(d);
 
@@ -472,9 +473,8 @@ class MICCAI_Dataset(Dataset):
 
         self.crop_rand = Compose(
             [ 
-                SpatialPadd(keys=['image1', 'image2','mask'], spatial_size = [config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']]),
                 RandCropByPosNegLabeld(
-                keys=['image1', 'image2', 'mask', 'lbl'], 
+                keys=['image1', 'image2', 'mask', 'lbl', 'gradient'], 
                 label_key='image1', 
                 spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
                 pos=1, 
@@ -503,9 +503,11 @@ class MICCAI_Dataset(Dataset):
                 brainmask = nib.load(os.path.join(patient_path, f'brain_mask.nii.gz'));
                 brainmask = brainmask.get_fdata();
 
+                gradient = pickle.load(open(os.path.join(patient_path,'gradient.gradient'), 'rb'));
+
                 gt = gt * brainmask;
                 
-                self.data.append([mri1, mri2, gt]);
+                self.data.append([mri1, mri2, gt, np.expand_dims(gradient.astype("uint8"),axis=0)]);
         
         else:
             for patient_path in patient_ids:
@@ -583,7 +585,7 @@ class MICCAI_Dataset(Dataset):
     def __getitem__(self, index):
         if self.train:
             
-            mri1, mri2, gt = self.data[index];
+            mri1, mri2, gt, gr = self.data[index];
 
             mri1 = np.expand_dims(mri1, axis=0);
             mri2 = np.expand_dims(mri2, axis=0);
@@ -597,11 +599,12 @@ class MICCAI_Dataset(Dataset):
                 if np.sum(gt) != 0:
                     ret_transforms = cropper(mri1, 
                                              mri2, 
-                                             gt, 
+                                             gt,
+                                             gr, 
                                              roi_size=(config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
                                              num_samples=config.hyperparameters['sample_per_mri'] if self.train else 1);
                 else:
-                    ret_transforms = self.crop_rand({'image1': mri1, 'image2': mri2,'mask': gt, 'lbl' :np.ones_like(mri1)});
+                    ret_transforms = self.crop_rand({'image1': mri1, 'image2': mri2,'mask': gt, 'gradient':gr, 'lbl' :np.ones_like(mri1)});
             
             ret_mri1 = None;
             ret_mri2 = None;
@@ -612,9 +615,10 @@ class MICCAI_Dataset(Dataset):
                 if config.hyperparameters['deterministic'] is False:
                     mri1_c = ret_transforms[i]['image1'];
                     mri2_c = ret_transforms[i]['image2'];
-                    gr = gradient(mri2_c.squeeze());
+                    gr_c = ret_transforms[i]['gradient'];
+                    # gr = gradient(mri2_c.squeeze());
                     
-                    gr = gr>threshold_otsu(gr);
+                    # gr = gr>threshold_otsu(gr);
                     gt_c = ret_transforms[i]['mask'];
 
                 else:
@@ -624,12 +628,12 @@ class MICCAI_Dataset(Dataset):
                     gt_c = torch.from_numpy(gt[:, int(center[0]-64):int(center[0]+64), int(center[1]-64):int(center[1]+64), int(center[2]-32):int(center[2]+32)]);
 
                 total_heatmap = torch.zeros_like(mri2_c, dtype=torch.float64);
-                g = (mri2_c > threshold_mean(mri2_c.numpy())) * np.where(gr>0, 0, 1) * np.where(mri2_c>0.8, 0, 1);
+                g = (mri2_c > threshold_mean(mri2_c.numpy())) * np.where(gr_c>0, 0, 1) * np.where(mri2_c>0.8, 0, 1);
                 
                 num_corrupted_patches = 0 if curr_pos is False else np.random.randint(3,7) if config.hyperparameters['deterministic'] is False else 3;
                 for i in range(num_corrupted_patches):
                     mri2_c, heatmap = add_synthetic_lesion_wm(mri2_c, g)
-                    total_heatmap += heatmap;
+                    total_heatmap = torch.clamp(heatmap+total_heatmap, 0, 1);
                 
                 mri1_c = self.transforms(mri1_c);
 
@@ -637,7 +641,7 @@ class MICCAI_Dataset(Dataset):
                 mri2_c = self.transforms(mri2_c);
 
                 total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
-                total_heatmap_thresh += gt_c;
+                total_heatmap_thresh = torch.clamp(gt_c + total_heatmap_thresh, 0, 1);
 
                 #print(f'num positives: {torch.sum(total_heatmap_thresh)}');
 
@@ -649,7 +653,7 @@ class MICCAI_Dataset(Dataset):
                 # else:
                 #     #print('neg');
                 #     center=[mri2_c.shape[1]//2, mri2_c.shape[2]//2, mri2_c.shape[3]//2]
-                # visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, g], center);
+                # visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, g, gr_c], center);
 
                 if ret_mri1 is None:
                     ret_mri1 = mri1_c.unsqueeze(dim=0);
@@ -900,18 +904,19 @@ def add_synthetic_lesion_wm(img, mask_g):
     return mri_after, cube;
 
 def cache_mri_gradients():
-    all_mri = glob(os.path.join('mri_data', '*.nii.gz'));
-    for mri_file in tqdm(all_mri):
-        file_name = os.path.basename(mri_file);
+    patient_ids = glob(os.path.join('miccai-processed/*/'));
+    for p in tqdm(patient_ids):
+        patient_path = os.path.join(p, 'flair_time02_on_middle_space.nii.gz');
+
+        file_name = os.path.basename(patient_path);
         file_name = file_name[:file_name.find('.')];
-        mrimage = nib.load(mri_file)
-        mrimage = nib.as_closest_canonical(mrimage);
+        mrimage = nib.load(patient_path)
         mrimage = mrimage.get_fdata()
         mrimage = window_center_adjustment(mrimage);
         mrimage = mrimage / np.max(mrimage);
         g = gradient(mrimage);
         g = g > threshold_otsu(g);
-        pickle.dump(g, open(os.path.join('mri_data', f'{file_name}.gradient'), 'wb'));
+        pickle.dump(g, open(os.path.join(p, f'gradient.gradient'), 'wb'));
 
 
 def gradient(mri):
