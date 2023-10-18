@@ -127,46 +127,49 @@ def save_examples_miccai(model, loader,):
         counter = 0;
         for idx, (batch) in pbar:
             mri, mri_noisy, heatmap, lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3], batch[4].to('cuda');
-            hm1 = model(mri, mri_noisy);
-            hm2 = model(mri_noisy, mri);
-            heatmap = heatmap.detach().cpu().numpy();
-            pred_lbl_1 = (torch.sigmoid(hm1* brainmask)>0.5).detach().cpu().numpy();
-            pred_lbl_2 = (torch.sigmoid(hm2* brainmask)>0.5).detach().cpu().numpy();
-            hm1 = hm1.detach().cpu().numpy();
-            hm2 = hm2.detach().cpu().numpy();
-            mri = mri.detach().cpu().numpy();
-            mri_noisy = mri_noisy.detach().cpu().numpy();
-            for j in range(2):
-                #heatmap = (1-heatmap) > 0;
-                pos_cords = np.where(heatmap[0] >0);
-                if len(pos_cords[0]) != 0:
-                    r = np.random.randint(0,len(pos_cords[0]));
-                    center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
-                else:
-                    center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
-                fig, ax = plt.subplots(2,6);
-                ax[0][0].imshow(pred_lbl_1[0,0,center[0], :, :], cmap='hot');
-                ax[0][1].imshow(pred_lbl_1[0,0,:,center[1], :], cmap='hot');
-                ax[0][2].imshow(pred_lbl_1[0,0, :, :,center[2]], cmap='hot');
+            if torch.sum(heatmap).item() > 0:
+                hm1 = model(mri, mri_noisy);
+                hm2 = model(mri_noisy, mri);
+                heatmap = heatmap.detach().cpu().numpy();
+                pred_lbl_1 = torch.sigmoid(hm1)>0.5;
+                pred_lbl_2 = torch.sigmoid(hm2)>0.5;
+                pred = (pred_lbl_1 * pred_lbl_2*brainmask).detach().cpu().numpy();
+                hm1 = hm1.detach().cpu().numpy();
+                hm2 = hm2.detach().cpu().numpy();
+                mri = mri.detach().cpu().numpy();
+                mri_noisy = mri_noisy.detach().cpu().numpy();
 
-                ax[0][3].imshow(pred_lbl_2[0,0,center[0], :, :], cmap='hot');
-                ax[0][4].imshow(pred_lbl_2[0,0,:,center[1], :], cmap='hot');
-                ax[0][5].imshow(pred_lbl_2[0,0, :, :,center[2]], cmap='hot');
+                for j in range(2):
+                    #heatmap = (1-heatmap) > 0;
+                    pos_cords = np.where(heatmap[0] >0);
+                    if len(pos_cords[0]) != 0:
+                        r = np.random.randint(0,len(pos_cords[0]));
+                        center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+                    else:
+                        center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
+                    fig, ax = plt.subplots(2,6);
+                    ax[0][0].imshow(pred[0,0,center[0], :, :], cmap='hot');
+                    ax[0][1].imshow(pred[0,0,:,center[1], :], cmap='hot');
+                    ax[0][2].imshow(pred[0,0, :, :,center[2]], cmap='hot');
 
-                ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
-                ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
-                ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
+                    ax[0][3].imshow(heatmap[0,0,center[0], :, :]);
+                    ax[0][4].imshow(heatmap[0,0,:,center[1], :]);
+                    ax[0][5].imshow(heatmap[0,0, :, :,center[2]]);
 
-                ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
-                ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
-                ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
+                    ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
+                    ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
+                    ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
 
-                fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
-                plt.close("all");
+                    ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
+                    ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
+                    ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
 
-            counter += 1;
-            if counter >=5:
-                break;
+                    fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
+                    plt.close("all");
+
+                counter += 1;
+                if counter >=5:
+                    break;
 
 def save_examples(model, loader,):
     if os.path.exists('samples') is False:

@@ -592,44 +592,42 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
                         mri_recon = (mri_noisy+hm2);
                         mri_noisy_recon = (mri+hm1);
 
-                        hm1 = hm1.cpu().detach().numpy().squeeze()
-                        hm2 = hm2.cpu().detach().numpy().squeeze()
+                        hm1 = (torch.sigmoid(hm1)>0.5).cpu().detach().numpy().squeeze()
+                        hm2 = (torch.sigmoid(hm2)>0.5).cpu().detach().numpy().squeeze()
+                        hm1 = hm1 * hm2;
                         mri_noisy = mri_noisy.cpu().detach().numpy().squeeze()
                         mri = mri.cpu().detach().numpy().squeeze()
                         mri_noisy_recon = mri_noisy_recon.cpu().detach().numpy().squeeze()
                         mri_recon = mri_recon.cpu().detach().numpy().squeeze()
                         hm1_diff = mri_noisy - mri;
 
-                        hm1_normalize = normalize(hm1);
-                        hm1_color = cm.coolwarm(normalize(hm1));
+                        
+                        hm1_color = cm.coolwarm(hm1);
 
                         #mri = np.repeat(np.expand_dims(mri, axis=-1), axis=-1, repeats=3);
                         mri = normalize(mri);
 
-                        hm1_positive_thresh = (hm1 > 0.1);
+                        hm1_positive_thresh = (hm1 > 0.0);
                         print(np.sum(hm1_positive_thresh));
-                        hm1_negative_thresh = (hm1 < -0.1);
-                        print(np.sum(hm1_negative_thresh));
-                        hm_thresh = np.clip(hm1_negative_thresh+hm1_positive_thresh, 0, 1);
+                        
+                        
                         hm1_color_positive = hm1_color * np.expand_dims(hm1_positive_thresh,axis=-1);
                         hm1_color_positive = hm1_color_positive[:,:,:,:3];
-                        hm1_color_negative = hm1_color * np.expand_dims(hm1_negative_thresh,axis=-1);
-                        hm1_color_negative = hm1_color_negative[:,:,:,:3];
                         
                         
                         hm1_positive = (hm1_positive_thresh * hm1);
-                        hm1_negative = ((hm1_negative_thresh*-1)*hm1);
+
 
                         hm1_positive = np.expand_dims(hm1_positive, axis = -1);
-                        hm1_negative = np.expand_dims(hm1_negative, axis = -1);
+
 
                         mri = np.repeat(np.expand_dims(mri, axis=-1), axis=-1, repeats=3);
 
                         hm1_positive_thresh = gaussian(hm1_positive_thresh,1);
-                        hm1_negative_thresh = gaussian(hm1_negative_thresh,1);
+
 
                         hm1_positive_thresh = np.expand_dims(hm1_positive_thresh, axis=-1)
-                        hm1_negative_thresh = np.expand_dims(hm1_negative_thresh, axis=-1)
+
 
                         
                         
@@ -642,10 +640,6 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
                                     j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
                                     k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d']] = mri_noisy;
                         
-                        predicted_negative_thresh[i*step_w:(i)*step_w + + config.hyperparameters['crop_size_w'], 
-                                    j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
-                                    k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d'],:] = hm1_negative_thresh;
-                        
                         predicted_positive_thresh[i*step_w:(i)*step_w + + config.hyperparameters['crop_size_w'], 
                                     j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
                                     k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d'],:] = hm1_positive_thresh;
@@ -656,19 +650,17 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
 
             predicted_mri = predicted_mri[:w,:h,:d,:];
             predicted_mri_noisy = predicted_mri_noisy[:w,:h,:d];
-            predicted_negative_thresh = predicted_negative_thresh[:w,:h,:d,:];
             predicted_positive_thresh = predicted_positive_thresh[:w,:h,:d,:];
             predicted_hm1_color = predicted_hm1_color[:w,:h,:d,:];
 
             pickle.dump([predicted_mri, 
                          predicted_mri_noisy, 
-                         predicted_negative_thresh, 
                          predicted_positive_thresh, 
                          predicted_hm1_color], 
                          open(f'{file_name}.dmp', 'wb'));
 
     else:
-        predicted_mri, predicted_mri_noisy, predicted_negative_thresh, predicted_positive_thresh, predicted_hm1_color = pickle.load(open(f'{file_name}.dmp', 'rb'))    
+        predicted_mri, predicted_mri_noisy, predicted_positive_thresh, predicted_hm1_color = pickle.load(open(f'{file_name}.dmp', 'rb'))    
 
     fig,ax = plt.subplots(2,3);
     # subfigures = fig.subfigures(2,1);
@@ -702,8 +694,8 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
     intensity_scale = 1.0;
 
     global mri_highlighted;
-    mri_highlighted = (1-predicted_negative_thresh)*predicted_mri + (predicted_negative_thresh * (predicted_hm1_color[:,:,:,:3]*intensity_scale + predicted_mri*(1-intensity_scale)));
-    mri_highlighted = (1-predicted_positive_thresh)*mri_highlighted + (predicted_positive_thresh * (predicted_hm1_color[:,:,:,:3]*intensity_scale + mri_highlighted*(1-intensity_scale)));
+    
+    mri_highlighted = (1-predicted_positive_thresh)*predicted_mri + (predicted_positive_thresh * (predicted_hm1_color[:,:,:,:3]*intensity_scale + predicted_mri*(1-intensity_scale)));
     ax[0][0].imshow(mri_highlighted[x, :, :], cmap='hot');
     ax[0][1].imshow(mri_highlighted[:,y, :], cmap='hot');
     ax[0][2].imshow(mri_highlighted[ :, :,z], cmap='hot');
@@ -760,8 +752,7 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
 
     def update_alpha(val):
         global mri_highlighted;
-        mri_highlighted = (1-predicted_negative_thresh)*predicted_mri + (predicted_negative_thresh * (predicted_hm1_color[:,:,:,:3]*val + predicted_mri*(1-val)));
-        mri_highlighted = (1-predicted_positive_thresh)*mri_highlighted + (predicted_positive_thresh * (predicted_hm1_color[:,:,:,:3]*val + mri_highlighted*(1-val)));
+        mri_highlighted = (1-predicted_positive_thresh)*predicted_mri + (predicted_positive_thresh * (predicted_hm1_color[:,:,:,:3]*val + predicted_mri*(1-val)));
         ax[0][0].imshow(mri_highlighted[x, :, :]);
         ax[0][1].imshow(mri_highlighted[:,y, :]);
         ax[0][2].imshow(mri_highlighted[ :, :,z]);
@@ -835,8 +826,8 @@ if __name__ == "__main__":
     model.to('cuda');
 
     #predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
-    predict_on_lesjak('miccai-processed\\013\\flair_time01_on_middle_space.nii.gz',
-                       'miccai-processed\\013\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
+    predict_on_lesjak('miccai-processed\\032\\flair_time01_on_middle_space.nii.gz',
+                       'miccai-processed\\032\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
 
     # train_loader, test_loader = get_loader();
     
