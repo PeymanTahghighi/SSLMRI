@@ -126,12 +126,12 @@ def save_examples_miccai(model, loader,):
         pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         counter = 0;
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap, lbl = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3];
+            mri, mri_noisy, heatmap, lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3], batch[4].to('cuda');
             hm1 = model(mri, mri_noisy);
             hm2 = model(mri_noisy, mri);
             heatmap = heatmap.detach().cpu().numpy();
-            hm1 = torch.sigmoid(hm1);
-            hm2 = torch.sigmoid(hm2);
+            pred_lbl_1 = (torch.sigmoid(hm1* brainmask)>0.5).detach().cpu().numpy();
+            pred_lbl_2 = (torch.sigmoid(hm2* brainmask)>0.5).detach().cpu().numpy();
             hm1 = hm1.detach().cpu().numpy();
             hm2 = hm2.detach().cpu().numpy();
             mri = mri.detach().cpu().numpy();
@@ -145,13 +145,13 @@ def save_examples_miccai(model, loader,):
                 else:
                     center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
                 fig, ax = plt.subplots(2,6);
-                ax[0][0].imshow(hm1[0,0,center[0], :, :], cmap='hot');
-                ax[0][1].imshow(hm1[0,0,:,center[1], :], cmap='hot');
-                ax[0][2].imshow(hm1[0,0, :, :,center[2]], cmap='hot');
+                ax[0][0].imshow(pred_lbl_1[0,0,center[0], :, :], cmap='hot');
+                ax[0][1].imshow(pred_lbl_1[0,0,:,center[1], :], cmap='hot');
+                ax[0][2].imshow(pred_lbl_1[0,0, :, :,center[2]], cmap='hot');
 
-                ax[0][3].imshow(hm2[0,0,center[0], :, :], cmap='hot');
-                ax[0][4].imshow(hm2[0,0,:,center[1], :], cmap='hot');
-                ax[0][5].imshow(hm2[0,0, :, :,center[2]], cmap='hot');
+                ax[0][3].imshow(pred_lbl_2[0,0,center[0], :, :], cmap='hot');
+                ax[0][4].imshow(pred_lbl_2[0,0,:,center[1], :], cmap='hot');
+                ax[0][5].imshow(pred_lbl_2[0,0, :, :,center[2]], cmap='hot');
 
                 ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
                 ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
@@ -300,7 +300,7 @@ def valid_miccai(model, loader):
             pred = pred_lbl_1 * pred_lbl_2 * brainmask;
             pred_lbl = torch.sum(pred).item()>0;
             if gt_lbl == 1:
-                dice = DiceLoss(sigmoid=True)(hm1, heatmap);
+                dice = DiceLoss()(pred, heatmap);
                 epoch_dice.append(dice.item());
             all_gt.append(gt_lbl);
             all_pred.append(pred_lbl);
