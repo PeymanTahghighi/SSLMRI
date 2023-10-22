@@ -11,12 +11,12 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 from torchvision.utils import save_image, make_grid
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from utility import IoU
 import torch.nn.functional as F
 from torchvision.ops.focal_loss import sigmoid_focal_loss
 from sklearn.metrics import precision_recall_fscore_support
 from monai.losses.dice import DiceLoss, DiceFocalLoss
 from skimage.filters import threshold_otsu
+import seaborn as sns
 #===============================================================
 def dice_loss(input, 
                 target, 
@@ -256,11 +256,10 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
                 # lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
-            
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = DiceFocalLoss(sigmoid=True, batch=True, smooth_dr=1.0, smooth_nr=1.0)(hm1, curr_heatmap);
-                lhf2 = DiceFocalLoss(sigmoid=True, batch=True, smooth_dr=1.0, smooth_nr=1.0)(hm2, curr_heatmap);
+                lhf1 = DiceFocalLoss(sigmoid=True, smooth_dr=1.0, smooth_nr=1.0)(hm1, curr_heatmap);
+                lhf2 = DiceFocalLoss(sigmoid=True, smooth_dr=1.0, smooth_nr=1.0)(hm2, curr_heatmap);
                # lhd2 = dice_loss(hm2, curr_heatmap);
                 lhh = DiceLoss(batch=True, smooth_dr=1.0, smooth_nr=1.0)(torch.sigmoid(hm1), torch.sigmoid(hm2));
                 loss = (lhf1 + lhf2 + lhh)/ config.hyperparameters['virtual_batch_size'];
@@ -358,7 +357,7 @@ if __name__ == "__main__":
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
     optimizer = optim.Adam(model.parameters(), lr = config.hyperparameters['learning_rate']);
 
-    #lr_scheduler = CosineAnnealingLR(optimizer, T_max=500, eta_min= 1e-6);
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-6);
     summary_writer = SummaryWriter(os.path.join('exp', 'Unet3D-regression'));
     best_loss = 100;
     start_epoch = 0;
@@ -372,7 +371,7 @@ if __name__ == "__main__":
 
     train_loader, test_loader = get_loader_miccai(0);
     sample_output_interval = 10;
-    for epoch in range(start_epoch, 500):
+    for epoch in range(start_epoch, 1000):
         model.train();
         train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
@@ -391,7 +390,7 @@ if __name__ == "__main__":
             'epoch': epoch+1
         }
         torch.save(ckpt,'resume.ckpt');
-        #lr_scheduler.step();
+        lr_scheduler.step();
 
         if best_loss > valid_loss:
             print(f'new best model found: {valid_loss}')

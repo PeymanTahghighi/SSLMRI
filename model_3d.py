@@ -90,15 +90,43 @@ class UpLayer(nn.Module):
 
 #---------------------------------------------------------------
 class ConvBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride) -> None:
+    def __init__(self, in_channels, out_channels, kernel_size, stride, norm=True, act=True) -> None:
         super().__init__();
-        self.net = nn.Sequential(
-            nn.Conv3d(in_channels, out_channels, kernel_size, stride, bias=False, padding=kernel_size//2),
-            nn.BatchNorm3d(out_channels),
-            nn.LeakyReLU(0.2, inplace=True)
-        )
+        ops = [];
+        ops.append(nn.Conv3d(in_channels, out_channels, kernel_size, stride, bias=False, padding=kernel_size//2));
+        if norm:
+            ops.append(nn.BatchNorm3d(out_channels));
+        if act:
+            ops.append(nn.LeakyReLU(0.2, inplace=True));
+        self.net = nn.Sequential(*ops);
     def forward(self, x):
         return self.net(x);
+#---------------------------------------------------------------
+
+#---------------------------------------------------------------
+class ResConvBlock(nn.Module):
+    '''
+    Based on Z. Liu, H. Mao, C. -Y. Wu, C. Feichtenhofer, T. Darrell and S. Xie, "A ConvNet for the 2020s," 
+    2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), New Orleans, LA, USA, 2022, pp. 
+    11966-11976, doi: 10.1109/CVPR52688.2022.01167.
+    '''
+    def __init__(self, in_channels, out_channels, kernel_size) -> None:
+        super().__init__();
+        self.res_block = nn.Sequential(
+        nn.Conv3d(in_channels, 
+                  out_channels,
+                  kernel_size, 
+                  padding=kernel_size//2),
+        nn.BatchNorm3d(out_channels),
+        nn.Conv3d(out_channels, out_channels*2, kernel_size=1),
+        nn.GELU(),
+        nn.Conv3d(out_channels*2, out_channels, kernel_size=1)
+        )
+
+        if in_channels != out_channels:
+            self.extra_conv = nn.Conv3d(in_channels, out_channels, kernel_size);
+    def forward(self, x):
+        return self.res_block(x) + self.extra_conv(x) if hasattr(self, 'extra_conv') else x;
 #---------------------------------------------------------------
 
 #---------------------------------------------------------------
@@ -448,20 +476,12 @@ class UNet3D(nn.Module):
     
     def _make_squeeze_excitation(self, feature_size):
         feature_selection = nn.Sequential(
-            ConvBlock(feature_size*2, feature_size, 1, 1),
+            ConvBlock(feature_size*2, feature_size, 1, 1, act=False),
         )
-        refinement = ResidualUnit(
-                self.dimensions,
+        refinement = ResConvBlock(
                 feature_size,
                 feature_size,
-                strides=1,
                 kernel_size=self.kernel_size,
-                subunits=self.num_res_units,
-                act=self.act,
-                norm=self.norm,
-                dropout=self.dropout,
-                bias=self.bias,
-                adn_ordering=self.adn_ordering,
             )
         atten = nn.Sequential(
             nn.AdaptiveAvgPool3d(1),
@@ -705,7 +725,7 @@ def test():
         in_channels=1,
         out_channels=1,
         channels=(64, 128, 256, 512),
-        strides=(4, 2, 2),
+        strides=(2, 2, 2),
         num_res_units=2,
         ).to('cuda')
     
