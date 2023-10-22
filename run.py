@@ -355,7 +355,7 @@ if __name__ == "__main__":
 
     model.to('cuda');
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
-    optimizer = optim.Adam(model.parameters(), lr = config.hyperparameters['learning_rate']);
+    optimizer = optim.AdamW(model.parameters(), lr = config.hyperparameters['learning_rate']);
 
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-6);
     summary_writer = SummaryWriter(os.path.join('exp', 'Unet3D-regression'));
@@ -364,7 +364,7 @@ if __name__ == "__main__":
 
     if RESUME is True:
         optimizer.load_state_dict(ckpt['optimizer']);
-        #lr_scheduler.load_state_dict(ckpt['scheduler']);
+        lr_scheduler.load_state_dict(ckpt['scheduler']);
         best_loss = ckpt['best_loss'];
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
@@ -385,7 +385,7 @@ if __name__ == "__main__":
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
-            #'scheduler': lr_scheduler.state_dict(),
+            'scheduler': lr_scheduler.state_dict(),
             'best_loss': best_loss,
             'epoch': epoch+1
         }
