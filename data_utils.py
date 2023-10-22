@@ -12,11 +12,12 @@ from sklearn.model_selection import train_test_split, KFold, StratifiedKFold
 import nibabel as nib
 from skimage.filters import gaussian, sobel, threshold_otsu, try_all_threshold, threshold_triangle, threshold_mean
 from monai.transforms import Compose, Resize, SpatialPadd, ScaleIntensityRange, Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise, RandSpatialCropSamplesd
-from scipy.ndimage import convolve
+from scipy.ndimage import convolve, binary_erosion, binary_opening
 from tqdm import tqdm
 import math
 from patchify import patchify
 import seaborn as sns
+
 
 def window_center_adjustment(img):
 
@@ -615,7 +616,11 @@ class MICCAI_Dataset(Dataset):
                     gr_c = torch.from_numpy(gr[:, int(center1[0]-32):int(center1[0]+32), int(center1[1]-32):int(center1[1]+32), int(center1[2]-32):int(center1[2]+32)]);
 
                 total_heatmap = torch.zeros_like(mri2_c, dtype=torch.float64);
-                g = (mri2_c > threshold_mean(mri2_c.numpy())) * np.where(gr_c>0, 0, 1) * np.where(mri2_c>0.8, 0, 1);
+                g = (mri2_c > threshold_mean(mri2_c.numpy())) * torch.where(gr_c>0, 0, 1) * torch.where(mri2_c>0.8, 0, 1);
+                g = g.numpy();
+
+                g = binary_opening(g.squeeze(), structure=np.ones((3,3,3))).astype(g.dtype)
+                g = torch.from_numpy(np.expand_dims(g, axis=0));
                 
                 num_corrupted_patches = np.random.randint(3,7) if config.hyperparameters['deterministic'] is False else 3;
                 for i in range(num_corrupted_patches):
@@ -765,9 +770,9 @@ def get_loader_miccai(fold):
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{fold}.fold'), 'rb'));
 
     mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
-    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=8, pin_memory=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=0, pin_memory=True);
+    mri_dataset_test = MICCAI_Dataset(test_ids[:1], train=False);
+    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=0, pin_memory=True);
 
     return train_loader, test_loader; 
 
@@ -845,9 +850,9 @@ def add_synthetic_lesion_wm(img, mask_g):
     _,h,w,d = mri.shape;
 
     mask_cpy = deepcopy(mask_g);
-    size_x = np.random.randint(3,5) if config.hyperparameters['deterministic'] is False else 3;
-    size_y = size_x - np.random.randint(0,2) if config.hyperparameters['deterministic'] is False else 3;
-    size_z = size_x - np.random.randint(0,2) if config.hyperparameters['deterministic'] is False else 3;
+    size_x = np.random.randint(2,6) if config.hyperparameters['deterministic'] is False else 3;
+    size_y = size_x - np.random.randint(0,size_x-1) if config.hyperparameters['deterministic'] is False else 3;
+    size_z = size_x - np.random.randint(0,size_x-1) if config.hyperparameters['deterministic'] is False else 3;
     mask_cpy[:,:,:,d-size_z:] = 0;
     mask_cpy[:,:,:,:size_z+1] = 0;
     mask_cpy[:,:,w-size_y:,:] = 0;
