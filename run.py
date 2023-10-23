@@ -372,32 +372,32 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loader_miccai(0);
     sample_output_interval = 10;
     for epoch in range(start_epoch, 1000):
-        model.train();
-        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
+        #model.train();
+        #train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
         model.eval();
         valid_loss = valid_miccai(model, test_loader);
-        summary_writer.add_scalar('train/loss', train_loss, epoch);
-        summary_writer.add_scalar('valid/loss', valid_loss, epoch);
-        if epoch %sample_output_interval == 0:
-            print('sampling outputs...');
-            save_examples_miccai(model, test_loader);
-        ckpt = {
-            'model': model.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'scheduler': lr_scheduler.state_dict(),
-            'best_loss': best_loss,
-            'epoch': epoch+1
-        }
-        torch.save(ckpt,'resume.ckpt');
-        lr_scheduler.step();
+        # summary_writer.add_scalar('train/loss', train_loss, epoch);
+        # summary_writer.add_scalar('valid/loss', valid_loss, epoch);
+        # if epoch %sample_output_interval == 0:
+        #     print('sampling outputs...');
+        #     save_examples_miccai(model, test_loader);
+        # ckpt = {
+        #     'model': model.state_dict(),
+        #     'optimizer': optimizer.state_dict(),
+        #     'scheduler': lr_scheduler.state_dict(),
+        #     'best_loss': best_loss,
+        #     'epoch': epoch+1
+        # }
+        # torch.save(ckpt,'resume.ckpt');
+        # lr_scheduler.step();
 
-        if best_loss > valid_loss:
-            print(f'new best model found: {valid_loss}')
-            best_loss = valid_loss;
-            torch.save({'model': model.state_dict(), 
-                        'best_loss': best_loss,
-                        'hp': config.hyperparameters},'best_model.ckpt');
+        # if best_loss > valid_loss:
+        #     print(f'new best model found: {valid_loss}')
+        #     best_loss = valid_loss;
+        #     torch.save({'model': model.state_dict(), 
+        #                 'best_loss': best_loss,
+        #                 'hp': config.hyperparameters},'best_model.ckpt');
 
 
 
