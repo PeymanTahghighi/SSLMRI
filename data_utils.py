@@ -17,6 +17,7 @@ from tqdm import tqdm
 import math
 from patchify import patchify
 import seaborn as sns
+from scipy.ndimage import distance_transform_edt
 
 
 def window_center_adjustment(img):
@@ -597,15 +598,14 @@ class MICCAI_Dataset(Dataset):
             ret_mri1 = None;
             ret_mri2 = None;
             ret_gt = None;
+            ret_dt = None;
 
             for i in range(config.hyperparameters['sample_per_mri']):
                 if config.hyperparameters['deterministic'] is False:
                     mri1_c = ret_transforms[i]['image1'];
                     mri2_c = ret_transforms[i]['image2'];
                     gr_c = ret_transforms[i]['gradient'];
-                    # gr = gradient(mri2_c.squeeze());
-                    
-                    # gr = gr>threshold_otsu(gr);
+
                     gt_c = ret_transforms[i]['mask'];
 
                 else:
@@ -635,27 +635,33 @@ class MICCAI_Dataset(Dataset):
                 total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
                 total_heatmap_thresh = torch.clamp(gt_c + total_heatmap_thresh, 0, 1);
 
-                #print(f'num positives: {torch.sum(gt_c)}');
 
-                # pos_cords = np.where(total_heatmap_thresh >0.0);
-                # if len(pos_cords[0]) != 0:
-                #     r = np.random.randint(0,len(pos_cords[0]));
-                #     center = [pos_cords[1][20], pos_cords[2][20],pos_cords[3][20]]
-                # # else:
-                # #     center=[mri2_c.shape[1]//2, mri2_c.shape[2]//2, mri2_c.shape[3]//2]
-                # visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, g, gr_c], center);
+                dt = distance_transform_edt(np.where(total_heatmap_thresh.squeeze().numpy()==1, 0, 1)) - \
+                (distance_transform_edt(total_heatmap_thresh.squeeze().numpy()) - 1);
+                dt = torch.from_numpy(np.expand_dims(dt, axis = 0));
+                
+
+                pos_cords = np.where(total_heatmap_thresh >0.0);
+                if len(pos_cords[0]) != 0:
+                    r = np.random.randint(0,len(pos_cords[0]));
+                    center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+                # else:
+                #     center=[mri2_c.shape[1]//2, mri2_c.shape[2]//2, mri2_c.shape[3]//2]
+                visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, dt, g], center);
 
                 if ret_mri1 is None:
                     ret_mri1 = mri1_c.unsqueeze(dim=0);
                     ret_mri2 = mri2_c.unsqueeze(dim=0);
                     ret_gt = total_heatmap_thresh.unsqueeze(dim=0);
+                    ret_dt = dt.unsqueeze(dim=0);
                 else:
                     ret_mri1 = torch.concat([ret_mri1, mri1_c.unsqueeze(dim=0)], dim=0);
                     ret_mri2 = torch.concat([ret_mri2, mri2_c.unsqueeze(dim=0)], dim=0);
                     ret_gt = torch.concat([ret_gt, total_heatmap_thresh.unsqueeze(dim=0)], dim=0);
+                    ret_dt = torch.concat([ret_dt, dt.unsqueeze(dim=0)], dim=0);
 
         
-            return ret_mri1, ret_mri2, ret_gt;
+            return ret_mri1, ret_mri2, ret_gt, ret_dt;
        
         else:
             mri1, mri2, ret_gt, lbl, brainmask = self.data[index];
@@ -769,10 +775,10 @@ def get_loader_miccai(fold):
     
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{fold}.fold'), 'rb'));
 
-    mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
-    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=8, pin_memory=True);
+    mri_dataset_train = MICCAI_Dataset(train_ids[:1], train=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=0, pin_memory=True);
+    mri_dataset_test = MICCAI_Dataset(test_ids[:1], train=False);
+    test_loader = DataLoader(mri_dataset_test, 1, True, num_workers=0, pin_memory=True);
 
     return train_loader, test_loader; 
 

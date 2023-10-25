@@ -15,9 +15,10 @@ import torch.nn.functional as F
 from torchvision.ops.focal_loss import sigmoid_focal_loss
 from sklearn.metrics import precision_recall_fscore_support
 from monai.losses.dice import DiceLoss, DiceFocalLoss 
-from monai.losses import GeneralizedDiceFocalLoss
+from monai.losses import GeneralizedDiceFocalLoss, GeneralizedDiceLoss
 from skimage.filters import threshold_otsu
 import seaborn as sns
+from utility import BounraryLoss
 #===============================================================
 def dice_loss(input, 
                 target, 
@@ -238,13 +239,15 @@ def train_miccai(model, train_loader, optimizer, scalar):
     curr_step = 0;
     curr_iou = 0;
     for batch_idx, (batch) in pbar:
-        mri, mri_noisy, heatmap = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(dim=0)
+        mri, mri_noisy, heatmap, distance_transform = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(dim=0),batch[3].to('cuda').squeeze(dim=0)
+
         steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
         curr_loss = 0;
         for s in range(steps):
             curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_distance_transform = distance_transform[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
             assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
             with torch.cuda.amp.autocast_mode.autocast():
@@ -259,11 +262,14 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = GeneralizedDiceFocalLoss(sigmoid=True)(hm1, curr_heatmap);
-                lhf2 = GeneralizedDiceFocalLoss(sigmoid=True)(hm2, curr_heatmap);
+                lhf1 = GeneralizedDiceLoss(sigmoid=True)(hm1, curr_heatmap);
+                lhf2 = GeneralizedDiceLoss(sigmoid=True)(hm2, curr_heatmap);
+
+                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform);
+                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform);
                # lhd2 = dice_loss(hm2, curr_heatmap);
                 lhh = DiceLoss(batch=True)(torch.sigmoid(hm1), torch.sigmoid(hm2));
-                loss = (lhf1 + lhf2 + lhh)/ config.hyperparameters['virtual_batch_size'];
+                loss = (lhf1 + lhf2 + lhh + lhb1 + lhb2)/ config.hyperparameters['virtual_batch_size'];
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
@@ -391,7 +397,7 @@ if __name__ == "__main__":
             'epoch': epoch+1
         }
         torch.save(ckpt,'resume.ckpt');
-        lr_scheduler.step();
+        #lr_scheduler.step();
 
         if best_loss > valid_loss:
             print(f'new best model found: {valid_loss}')
