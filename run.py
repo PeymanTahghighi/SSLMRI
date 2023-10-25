@@ -14,7 +14,8 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.nn.functional as F
 from torchvision.ops.focal_loss import sigmoid_focal_loss
 from sklearn.metrics import precision_recall_fscore_support
-from monai.losses.dice import DiceLoss, DiceFocalLoss
+from monai.losses.dice import DiceLoss, DiceFocalLoss 
+from monai.losses import GeneralizedDiceFocalLoss
 from skimage.filters import threshold_otsu
 import seaborn as sns
 #===============================================================
@@ -258,10 +259,10 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = DiceFocalLoss(sigmoid=True, smooth_dr=1.0, smooth_nr=1.0)(hm1, curr_heatmap);
-                lhf2 = DiceFocalLoss(sigmoid=True, smooth_dr=1.0, smooth_nr=1.0)(hm2, curr_heatmap);
+                lhf1 = GeneralizedDiceFocalLoss(sigmoid=True)(hm1, curr_heatmap);
+                lhf2 = GeneralizedDiceFocalLoss(sigmoid=True)(hm2, curr_heatmap);
                # lhd2 = dice_loss(hm2, curr_heatmap);
-                lhh = DiceLoss(batch=True, smooth_dr=1.0, smooth_nr=1.0)(torch.sigmoid(hm1), torch.sigmoid(hm2));
+                lhh = DiceLoss(batch=True)(torch.sigmoid(hm1), torch.sigmoid(hm2));
                 loss = (lhf1 + lhf2 + lhh)/ config.hyperparameters['virtual_batch_size'];
 
             scalar.scale(loss).backward();

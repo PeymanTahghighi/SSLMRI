@@ -1,4 +1,4 @@
-from data_utils import  get_loader, window_center_adjustment
+from data_utils import  get_loader, window_center_adjustment, get_loader_miccai
 import cv2
 import numpy as np
 from tqdm import tqdm
@@ -27,25 +27,62 @@ from matplotlib.widgets import Slider, Button
 from patchify import patchify
 import math
 import pickle
+from monai.losses.dice import DiceLoss, DiceFocalLoss
 
 def valid(model, loader):
-    print(('\n' + '%10s'*1) %('Loss'));
-    pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
-    epoch_loss = [];
-   
-    for idx, (batch) in pbar:
-        mri, mri_noisy, mask = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda').unsqueeze(dim=1);
-        hm1 = model(mri, mri_noisy);
-        hm2 = model(mri_noisy, mri);
-        lih1 = F.l1_loss((mri+hm1)*mask.float(), mri_noisy*mask.float());
-        lih2 = F.l1_loss((mri_noisy+hm2)*mask.float(), mri*mask.float());
-        lhh = F.l1_loss((hm1+hm2)*mask.float(), torch.zeros_like(hm1));
-        total_loss = lih1 + lih2 + lhh;
-        epoch_loss.append(total_loss.item());
-        save_examples(model, batch, idx);
-        pbar.set_description(('%10.4g')%(np.mean(epoch_loss)));
+    with torch.no_grad():
+        pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+        counter = 0;
+        epoch_dice = [];
+        for idx, (batch) in pbar:
+            mri, mri_noisy, heatmap, gt_lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3], batch[4].to('cuda');
+            if torch.sum(heatmap).item() > 0:
+                hm1 = model(mri, mri_noisy);
+                hm2 = model(mri_noisy, mri);
+                pred_lbl_1 = torch.sigmoid(hm1)>0.5;
+                pred_lbl_2 = torch.sigmoid(hm2)>0.5;
+                pred = (pred_lbl_1 * pred_lbl_2*brainmask);
+                hm1 = hm1.detach().cpu().numpy();
+                hm2 = hm2.detach().cpu().numpy();
+                mri = mri.detach().cpu().numpy();
+                mri_noisy = mri_noisy.detach().cpu().numpy();
 
-    return np.mean(epoch_loss);
+                if gt_lbl == 1:
+                    dice = DiceLoss()(pred, heatmap);
+                    
+                    epoch_dice.append(dice.item());
+
+                if dice >0.6:
+                    heatmap = heatmap.detach().cpu().numpy();
+                    pred = pred.detach().cpu().numpy();
+                    for j in range(2):
+                        #heatmap = (1-heatmap) > 0;
+                        pos_cords = np.where(heatmap[0] >0);
+                        if len(pos_cords[0]) != 0:
+                            r = np.random.randint(0,len(pos_cords[0]));
+                            center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+                        else:
+                            center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
+                        fig, ax = plt.subplots(2,6);
+                        ax[0][0].imshow(pred[0,0,center[0], :, :], cmap='hot');
+                        ax[0][1].imshow(pred[0,0,:,center[1], :], cmap='hot');
+                        ax[0][2].imshow(pred[0,0, :, :,center[2]], cmap='hot');
+
+                        ax[0][3].imshow(heatmap[0,0,center[0], :, :]);
+                        ax[0][4].imshow(heatmap[0,0,:,center[1], :]);
+                        ax[0][5].imshow(heatmap[0,0, :, :,center[2]]);
+
+                        ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
+                        ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
+                        ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
+
+                        ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
+                        ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
+                        ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
+
+                        fig.savefig(os.path.join('samples',f'sample_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
+                        plt.close("all");
+        print(np.mean(epoch_dice));
 
 def save_examples(model, batch, name):
     if os.path.exists('samples') is False:
@@ -492,7 +529,7 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
     z_slider.on_changed(update_slice_z)
     plt.show();
 
-def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False):
+def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cached = False):
     file_name = os.path.basename(first_mri_path);
     file_name = file_name[:file_name.find('.')];
     
@@ -509,36 +546,25 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
             mrimage = normalize_internsity(mrimage)[0];
             return mrimage.unsqueeze(dim=0), mask; 
 
+        counter = 0;
         with torch.no_grad():
             fixed_path = first_mri_path
             moving_path = second_mri_path
+            gt_path = base_path + "\\ground_truth.nii.gz";
+            brainmask_path = base_path + "\\brain_mask.nii.gz";
 
 
             fixed_image_nib = nib.load(fixed_path)
             moving_image_nib = nib.load(moving_path)
+            gt_image_nib = nib.load(gt_path)
+            brainmask_image_nib = nib.load(brainmask_path)
 
-            #moving_image_nib = nib.as_closest_canonical(moving_image_nib);
-            #fixed_image_nib = nib.as_closest_canonical(fixed_image_nib);
 
             fixed_image_data = fixed_image_nib.get_fdata()
             moving_image_data = moving_image_nib.get_fdata()
+            gt = gt_image_nib.get_fdata();
+            brainmask = brainmask_image_nib.get_fdata();
 
-            #target_spacing = (1.0, 1.0, 1.0)
-
-            #fixed_image_data = load_and_resample_nii_image(fixed_image_nib, fixed_image_data, target_spacing)
-            #moving_image_data = load_and_resample_nii_image(moving_image_nib, moving_image_data, target_spacing)
-
-            #fixed_sitk = sitk.GetImageFromArray(fixed_image_data)
-            #moving_sitk = sitk.GetImageFromArray(moving_image_data)
-
-            # We perform the histogram matching
-            #matched_moving_sitk = histogram_match(moving_sitk, fixed_sitk)
-
-            # We convert the matched image back to numpy array
-            # matched_moving_image_data = sitk.GetArrayFromImage(matched_moving_sitk)
-
-            # rigid_registered_image, rigid_transform = rigid_registration(fixed_sitk, matched_moving_sitk)
-            # rigid_registered_image_data = sitk.GetArrayFromImage(rigid_registered_image)
 
             fixed_image_data = window_center_adjustment(fixed_image_data);
             rigid_registered_image_data = window_center_adjustment(moving_image_data);
@@ -556,16 +582,28 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
 
             fixed_image_data_padded  = torch.zeros((new_w, new_h, new_d), dtype = fixed_image_data.dtype);
             rigid_registered_image_data_padded  = torch.zeros((new_w, new_h, new_d), dtype = fixed_image_data.dtype);
+            gt_padded  = np.zeros((new_w, new_h, new_d), dtype = gt.dtype);
+            brainmask_padded  = np.zeros((new_w, new_h, new_d), dtype = brainmask.dtype);
 
             fixed_image_data_padded[:w,:h,:d] = fixed_image_data;
             rigid_registered_image_data_padded[:w,:h,:d] = rigid_registered_image_data;
+            gt_padded[:w,:h,:d] = gt;
+            brainmask_padded[:w,:h,:d] = brainmask;
 
-            step_w, step_h, step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
+            step_w, step_h, step_d = config.hyperparameters['crop_size_w']//2, config.hyperparameters['crop_size_h']//2, config.hyperparameters['crop_size_d']//2;
             fixed_image_data_patches = patchify(fixed_image_data_padded.numpy(), 
                                                 (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                 (step_w, step_h, step_d));
             
             rigid_registered_image_data_patches = patchify(rigid_registered_image_data_padded.numpy(), 
+                                                (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                (step_w, step_h, step_d));
+            
+            gt_patches = patchify(gt_padded, 
+                                                (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                (step_w, step_h, step_d));
+            
+            brainmask_patches = patchify(brainmask_padded, 
                                                 (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                 (step_w, step_h, step_d));
 
@@ -574,6 +612,8 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
             predicted_positive_thresh = np.zeros((new_w, new_h, new_d,1), dtype = np.float64);
             predicted_negative_thresh = np.zeros((new_w, new_h, new_d,1), dtype = np.float64);
             predicted_hm1_color = np.zeros((new_w, new_h, new_d,4), dtype = np.float64);
+            predicted_aggregated = np.zeros((new_w, new_h, new_d), dtype = np.int32);
+            predicted_aggregated_count = np.zeros((new_w, new_h, new_d), dtype = np.int32);
             for i in range(fixed_image_data_patches.shape[0]):
                 for j in range(fixed_image_data_patches.shape[1]):
                     for k in range(fixed_image_data_patches.shape[2]):
@@ -581,6 +621,9 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
 
                         fixed_image_data_trans = torch.from_numpy(fixed_image_data_patches[i,j,k,:,:,:]);
                         rigid_registered_image_data_trans = torch.from_numpy(rigid_registered_image_data_patches[i,j,k,:,:,:]);
+                        gt_lbl = np.sum(gt_patches[i,j,k,:,:,:]);
+                        heatmap = torch.from_numpy(gt_patches[i,j,k,:,:,:]);
+                        brainmask = torch.from_numpy(brainmask_patches[i,j,k,:,:,:]).to('cuda');
 
                         
 
@@ -589,218 +632,62 @@ def predict_on_lesjak(first_mri_path, second_mri_path, model, use_cached = False
                         hm1 = model(mri, mri_noisy);
                         hm2 = model(mri_noisy, mri);
 
-                        mri_recon = (mri_noisy+hm2);
-                        mri_noisy_recon = (mri+hm1);
+                        pred_lbl_1 = torch.sigmoid(hm1)>0.5;
+                        pred_lbl_2 = torch.sigmoid(hm2)>0.5;
+                        pred = (pred_lbl_1 * pred_lbl_2);
+                        hm1 = hm1.detach().cpu().numpy();
+                        hm2 = hm2.detach().cpu().numpy();
+                        mri = mri.detach().cpu().numpy();
+                        mri_noisy = mri_noisy.detach().cpu().numpy();
 
-                        hm1 = (torch.sigmoid(hm1)>0.5).cpu().detach().numpy().squeeze()
-                        hm2 = (torch.sigmoid(hm2)>0.5).cpu().detach().numpy().squeeze()
-                        hm1 = hm1 * hm2;
-                        mri_noisy = mri_noisy.cpu().detach().numpy().squeeze()
-                        mri = mri.cpu().detach().numpy().squeeze()
-                        mri_noisy_recon = mri_noisy_recon.cpu().detach().numpy().squeeze()
-                        mri_recon = mri_recon.cpu().detach().numpy().squeeze()
-                        hm1_diff = mri_noisy - mri;
-
-                        
-                        hm1_color = cm.coolwarm(hm1);
-
-                        #mri = np.repeat(np.expand_dims(mri, axis=-1), axis=-1, repeats=3);
-                        mri = normalize(mri);
-
-                        hm1_positive_thresh = (hm1 > 0.0);
-                        print(np.sum(hm1_positive_thresh));
-                        
-                        
-                        hm1_color_positive = hm1_color * np.expand_dims(hm1_positive_thresh,axis=-1);
-                        hm1_color_positive = hm1_color_positive[:,:,:,:3];
-                        
-                        
-                        hm1_positive = (hm1_positive_thresh * hm1);
-
-
-                        hm1_positive = np.expand_dims(hm1_positive, axis = -1);
-
-
-                        mri = np.repeat(np.expand_dims(mri, axis=-1), axis=-1, repeats=3);
-
-                        hm1_positive_thresh = gaussian(hm1_positive_thresh,1);
-
-
-                        hm1_positive_thresh = np.expand_dims(hm1_positive_thresh, axis=-1)
-
-
-                        
-                        
-                        #add mri to the whole predicted mri
-                        predicted_mri[i*step_w:(i)*step_w + config.hyperparameters['crop_size_w'], 
+                        predicted_aggregated[i*step_w:i*step_w + config.hyperparameters['crop_size_w'], 
                                     j*step_h:(j)*step_h + config.hyperparameters['crop_size_h'], 
-                                    k*step_d:(k)*step_d + config.hyperparameters['crop_size_d'],:] = mri;
+                                    k*step_d:(k)*step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
                         
-                        predicted_mri_noisy[i*step_w:(i)*step_w + + config.hyperparameters['crop_size_w'], 
-                                    j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
-                                    k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d']] = mri_noisy;
+                        predicted_aggregated_count[i*step_w:i*step_w + config.hyperparameters['crop_size_w'], 
+                                    j*step_h:(j)*step_h + config.hyperparameters['crop_size_h'], 
+                                    k*step_d:(k)*step_d + config.hyperparameters['crop_size_d']] += np.ones((config.hyperparameters['crop_size_w'], 
+                                                                                                             config.hyperparameters['crop_size_h'], 
+                                                                                                             config.hyperparameters['crop_size_d']), dtype=np.int32);
                         
-                        predicted_positive_thresh[i*step_w:(i)*step_w + + config.hyperparameters['crop_size_w'], 
-                                    j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
-                                    k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d'],:] = hm1_positive_thresh;
-                        
-                        predicted_hm1_color[i*step_w:(i)*step_w + + config.hyperparameters['crop_size_w'], 
-                                    j*step_h:(j)*step_h+ config.hyperparameters['crop_size_h'], 
-                                    k*step_d:(k)*step_d+ config.hyperparameters['crop_size_d'],:] = hm1_color;
+                        if gt_lbl > 0:
+                            heatmap = heatmap.detach().cpu().numpy();
+                            pred = pred.detach().cpu().numpy();
+                            for j in range(1):
+                                #heatmap = (1-heatmap) > 0;
+                                pos_cords = np.where(heatmap >0);
+                                if len(pos_cords[0]) != 0:
+                                    r = np.random.randint(0,len(pos_cords[0]));
+                                    center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+                                else:
+                                    center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
+                                fig, ax = plt.subplots(2,6);
+                                ax[0][0].imshow(pred[0,0,center[0], :, :], cmap='hot');
+                                ax[0][1].imshow(pred[0,0,:,center[1], :], cmap='hot');
+                                ax[0][2].imshow(pred[0,0, :, :,center[2]], cmap='hot');
 
-            predicted_mri = predicted_mri[:w,:h,:d,:];
-            predicted_mri_noisy = predicted_mri_noisy[:w,:h,:d];
-            predicted_positive_thresh = predicted_positive_thresh[:w,:h,:d,:];
-            predicted_hm1_color = predicted_hm1_color[:w,:h,:d,:];
+                                ax[0][3].imshow(heatmap[center[0], :, :]);
+                                ax[0][4].imshow(heatmap[:,center[1], :]);
+                                ax[0][5].imshow(heatmap[:, :,center[2]]);
 
-            pickle.dump([predicted_mri, 
-                         predicted_mri_noisy, 
-                         predicted_positive_thresh, 
-                         predicted_hm1_color], 
-                         open(f'{file_name}.dmp', 'wb'));
+                                ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
+                                ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
+                                ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
 
-    else:
-        predicted_mri, predicted_mri_noisy, predicted_positive_thresh, predicted_hm1_color = pickle.load(open(f'{file_name}.dmp', 'rb'))    
+                                ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
+                                ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
+                                ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
 
-    fig,ax = plt.subplots(2,3);
-    # subfigures = fig.subfigures(2,1);
-    # axes1 = subfigures[0].subplots(1,3);
-    # subfigures[0].suptitle('Old MRI');
-    # axes2 = subfigures[1].subplots(1,3);
-    # subfigures[1].suptitle('New MRI');
+                                fig.savefig(os.path.join('samples',f'sample_{counter}_{j}.png'));
+                                plt.close("all");
 
-    #This is heatmap drawing
-    # axes1[0].imshow(hm1[pos_cords[0][r], :, :], cmap = 'hot');
-    # axes1[1].imshow(hm1[:,pos_cords[1][r], :], cmap = 'hot');
-    # axes1[2].imshow(hm1[ :, :,pos_cords[2][r]], cmap = 'hot');
-
-    # axes1[0].axis('off');
-    # axes1[1].axis('off');
-    # axes1[2].axis('off');
-
-
-    # axes2[0].imshow(hm1_color[pos_cords[0][r], :, :]);
-    # axes2[1].imshow(hm1_color[:,pos_cords[1][r], :]);
-    # axes2[2].imshow(hm1_color[ :, :,pos_cords[2][r]]);
-    # axes2[0].axis('off');
-    # axes2[1].axis('off');
-    # axes2[2].axis('off');
-    #============================
-
-    global x,y,z;
-    x = 10;
-    y = 10;
-    z = 10;
-    intensity_scale = 1.0;
-
-    global mri_highlighted;
-    
-    mri_highlighted = (1-predicted_positive_thresh)*predicted_mri + (predicted_positive_thresh * (predicted_hm1_color[:,:,:,:3]*intensity_scale + predicted_mri*(1-intensity_scale)));
-    ax[0][0].imshow(mri_highlighted[x, :, :], cmap='hot');
-    ax[0][1].imshow(mri_highlighted[:,y, :], cmap='hot');
-    ax[0][2].imshow(mri_highlighted[ :, :,z], cmap='hot');
-    ax[0][0].axis('off');
-    ax[0][1].axis('off');
-    ax[0][2].axis('off');
-
-
-    ax[1][0].imshow(predicted_mri_noisy[x, :, :], cmap='gray');
-    ax[1][1].imshow(predicted_mri_noisy[:,y, :], cmap='gray');
-    ax[1][2].imshow(predicted_mri_noisy[ :, :,z], cmap='gray');
-    ax[1][0].axis('off');
-    ax[1][1].axis('off');
-    ax[1][2].axis('off');
-
-    fig.subplots_adjust(left=0.25, bottom=0.25)
-
-    axamp = fig.add_axes([0.1, 0.25, 0.0225, 0.63])
-    amp_slider = Slider(
-        ax=axamp,
-        label="Alpha",
-        valmin=0.0,
-        valmax=1,
-        valinit=intensity_scale,
-        orientation="vertical"
-    )
-
-    ax_x = fig.add_axes([0.25, 0.15, 0.65, 0.03])
-    x_slider = Slider(
-        ax=ax_x,
-        label='X',
-        valmin=0,
-        valmax=predicted_mri.shape[0]-1,
-        valinit=x,
-    )
-
-    ax_y = fig.add_axes([0.25, 0.1, 0.65, 0.03])
-    y_slider = Slider(
-        ax=ax_y,
-        label='Y',
-        valmin=0,
-        valmax=predicted_mri.shape[1]-1,
-        valinit=y,
-    )
-
-    ax_z = fig.add_axes([0.25, 0.05, 0.65, 0.03])
-    z_slider = Slider(
-        ax=ax_z,
-        label='Z',
-        valmin=0,
-        valmax=predicted_mri.shape[2]-1,
-        valinit=z,
-    )
-
-    def update_alpha(val):
-        global mri_highlighted;
-        mri_highlighted = (1-predicted_positive_thresh)*predicted_mri + (predicted_positive_thresh * (predicted_hm1_color[:,:,:,:3]*val + predicted_mri*(1-val)));
-        ax[0][0].imshow(mri_highlighted[x, :, :]);
-        ax[0][1].imshow(mri_highlighted[:,y, :]);
-        ax[0][2].imshow(mri_highlighted[ :, :,z]);
-
-    def update(val):
-        update_alpha(val);
-    
-    def update_slice_x(val):
-        global x;
-        x = int(val);
-        ax[0][0].imshow(mri_highlighted[x, :, :]);
-        ax[0][1].imshow(mri_highlighted[:,y, :]);
-        ax[0][2].imshow(mri_highlighted[ :, :,z]);
-
-        ax[1][0].imshow(predicted_mri_noisy[x, :, :], cmap='gray');
-        ax[1][1].imshow(predicted_mri_noisy[:,y, :], cmap='gray');
-        ax[1][2].imshow(predicted_mri_noisy[ :, :,z], cmap='gray');
-  
-
-    def update_slice_y(val):
-        global y;
-        y = int(val);
-        ax[0][0].imshow(mri_highlighted[x, :, :]);
-        ax[0][1].imshow(mri_highlighted[:,y, :]);
-        ax[0][2].imshow(mri_highlighted[ :, :,z]);
-
-        ax[1][0].imshow(predicted_mri_noisy[x, :, :], cmap='gray');
-        ax[1][1].imshow(predicted_mri_noisy[:,y, :], cmap='gray');
-        ax[1][2].imshow(predicted_mri_noisy[ :, :,z], cmap='gray');
-
-    
-    def update_slice_z(val):
-        global z;
-        z = int(val);
-        ax[0][0].imshow(mri_highlighted[x, :, :]);
-        ax[0][1].imshow(mri_highlighted[:,y, :]);
-        ax[0][2].imshow(mri_highlighted[ :, :,z]);
-
-        ax[1][0].imshow(predicted_mri_noisy[x, :, :], cmap='gray');
-        ax[1][1].imshow(predicted_mri_noisy[:,y, :], cmap='gray');
-        ax[1][2].imshow(predicted_mri_noisy[ :, :,z], cmap='gray');
-
-
-    amp_slider.on_changed(update)
-    x_slider.on_changed(update_slice_x)
-    y_slider.on_changed(update_slice_y)
-    z_slider.on_changed(update_slice_z)
-    plt.show();
+                                counter +=1;
+        m = np.max(predicted_aggregated_count);                
+        final_pred = np.where(predicted_aggregated>predicted_aggregated_count//2,1,0)
+        gt_padded = torch.from_numpy(gt_padded)
+        final_pred = torch.from_numpy(final_pred)
+        dice = DiceLoss()(final_pred.unsqueeze(0).unsqueeze(0), gt_padded.unsqueeze(0).unsqueeze(0));
+        return dice;
 
 if __name__ == "__main__":
     #cache_dataset();
@@ -825,11 +712,18 @@ if __name__ == "__main__":
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 
-    #predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
-    predict_on_lesjak('miccai-processed\\032\\flair_time01_on_middle_space.nii.gz',
-                       'miccai-processed\\032\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
+    train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{0}.fold'), 'rb'));
 
-    # train_loader, test_loader = get_loader();
+    #predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
+    total_dice = [];
+    for i in range(len(test_ids)):
+        dice = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
+                       f'{test_ids[i]}\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
+        if dice < 0.9:
+            total_dice.append(dice);
+    print(np.mean(total_dice));
+
+    # train_loader, test_loader = get_loader_miccai(0);
     
     # model.eval();
     # valid_loss = valid(model, test_loader);
