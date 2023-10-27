@@ -10,4 +10,3 @@ hyperparameters = {
     'deterministic':False,
     'virtual_batch_size':1
 }
-DEBUG_TRAIN_DATA = False;
