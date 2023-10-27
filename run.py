@@ -345,7 +345,7 @@ if __name__ == "__main__":
     #cache_mri_gradients();
     #update_folds_miccai();
 
-
+    LOG_MESSAGE = 'model is 64,128,256,512 with 10xbl'
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
@@ -404,7 +404,8 @@ if __name__ == "__main__":
             best_loss = valid_loss;
             torch.save({'model': model.state_dict(), 
                         'best_loss': best_loss,
-                        'hp': config.hyperparameters},'best_model.ckpt');
+                        'hp': config.hyperparameters,
+                        'log': LOG_MESSAGE},'best_model.ckpt');
 
 
 
