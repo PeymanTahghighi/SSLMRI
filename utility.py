@@ -14,8 +14,6 @@ class BounraryLoss(object):
     def __call__(self, pred, dt):
         if self.sigmoid:
             pred = torch.sigmoid(pred);
-        axis = [i for i in range(2, pred.ndim)];
-        bl = einsum("bnwhd,bnwhd->bnwhd", pred, dt);
-        
+        bl = einsum("bnwhd,bnwhd->bnwhd", pred, dt);     
         return bl.mean();
 
