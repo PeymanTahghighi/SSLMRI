@@ -29,28 +29,39 @@ import math
 import pickle
 from monai.losses.dice import DiceLoss, DiceFocalLoss
 
-def valid(model, loader):
+def valid(model, loader, total_data):
     with torch.no_grad():
         pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         counter = 0;
         epoch_dice = [];
         for idx, (batch) in pbar:
             mri, mri_noisy, heatmap, gt_lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3], batch[4].to('cuda');
-            if torch.sum(heatmap).item() > 0:
-                hm1 = model(mri, mri_noisy);
-                hm2 = model(mri_noisy, mri);
-                pred_lbl_1 = torch.sigmoid(hm1)>0.5;
-                pred_lbl_2 = torch.sigmoid(hm2)>0.5;
-                pred = (pred_lbl_1 * pred_lbl_2*brainmask);
-                hm1 = hm1.detach().cpu().numpy();
-                hm2 = hm2.detach().cpu().numpy();
-                mri = mri.detach().cpu().numpy();
-                mri_noisy = mri_noisy.detach().cpu().numpy();
+           # mri_c, mri_noisy_c, ht_c,_,_ = total_data[counter];
 
-                if gt_lbl == 1:
-                    dice = DiceLoss()(pred, heatmap);
-                    
-                    epoch_dice.append(dice.item());
+            
+            hm1 = model(mri, mri_noisy);
+            hm2 = model(mri_noisy, mri);
+            pred_lbl_1 = torch.sigmoid(hm1)>0.5;
+            pred_lbl_2 = torch.sigmoid(hm2)>0.5;
+            pred = (pred_lbl_1 * pred_lbl_2*brainmask);
+
+            
+            
+            
+            hm1 = hm1.detach().cpu().numpy();
+            hm2 = hm2.detach().cpu().numpy();
+            mri = mri.detach().cpu().numpy();
+            mri_noisy = mri_noisy.detach().cpu().numpy();
+
+            dice_c = total_data[counter];
+            diff1 = torch.sum(torch.abs(dice_c-pred));
+            if diff1!=0:
+                print(f"diff1: {diff1}");
+            counter +=1;
+            if gt_lbl == 1:
+                dice = DiceLoss()(pred, heatmap);
+                
+                epoch_dice.append(dice.item());
 
                 if dice >0.6:
                     heatmap = heatmap.detach().cpu().numpy();
@@ -82,6 +93,8 @@ def valid(model, loader):
 
                         fig.savefig(os.path.join('samples',f'sample_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
                         plt.close("all");
+            
+
         print(np.mean(epoch_dice));
 
 def save_examples(model, batch, name):
@@ -209,6 +222,7 @@ def normalize(img):
     img = (img - np.min(img));
     img = img/np.max(img);
     return img;
+
 
 def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False):
     file_name = os.path.basename(first_mri_path);
@@ -532,7 +546,8 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
 def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cached = False):
     file_name = os.path.basename(first_mri_path);
     file_name = file_name[:file_name.find('.')];
-    
+
+    total_dice = [];
     if use_cached is False:
         crop = RandSpatialCropd(keys=['image1','image2', 'mask1', 'mask2'],roi_size= (config.hyperparameters['crop_size_w'],
                                                                                       config.hyperparameters['crop_size_h'],
@@ -541,100 +556,127 @@ def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cac
         def preprocess(mrimage):
             mask = mrimage > threshold_otsu(mrimage);
             mask = np.expand_dims(mask, axis=0);
-            mrimage = np.expand_dims(mrimage, axis=0);
-            mrimage = mrimage / np.max(mrimage);
-            mrimage = normalize_internsity(mrimage)[0];
-            return mrimage.unsqueeze(dim=0), mask; 
+            mrimage = mrimage / (np.max(mrimage)+1e-4);
+            return mrimage, mask; 
 
         counter = 0;
         with torch.no_grad():
-            fixed_path = first_mri_path
-            moving_path = second_mri_path
             gt_path = base_path + "\\ground_truth.nii.gz";
             brainmask_path = base_path + "\\brain_mask.nii.gz";
 
 
-            fixed_image_nib = nib.load(fixed_path)
-            moving_image_nib = nib.load(moving_path)
+            mri1 = nib.load(first_mri_path)
+            mri2 = nib.load(second_mri_path)
             gt_image_nib = nib.load(gt_path)
             brainmask_image_nib = nib.load(brainmask_path)
 
 
-            fixed_image_data = fixed_image_nib.get_fdata()
-            moving_image_data = moving_image_nib.get_fdata()
+            mri1 = mri1.get_fdata()
+            mri2 = mri2.get_fdata()
             gt = gt_image_nib.get_fdata();
             brainmask = brainmask_image_nib.get_fdata();
 
+            gt = gt*brainmask;
 
-            fixed_image_data = window_center_adjustment(fixed_image_data);
-            rigid_registered_image_data = window_center_adjustment(moving_image_data);
 
-            fixed_image_data, fixed_image_data_mask = preprocess(fixed_image_data);
-            rigid_registered_image_data, rigid_registered_image_data_mask = preprocess(rigid_registered_image_data);
+            mri1 = window_center_adjustment(mri1);
+            mri2 = window_center_adjustment(mri2);
 
-            fixed_image_data = fixed_image_data.squeeze();
-            rigid_registered_image_data = rigid_registered_image_data.squeeze();
+            mri1, fixed_image_data_mask = preprocess(mri1);
+            mri2, rigid_registered_image_data_mask = preprocess(mri2);
 
-            w,h,d = fixed_image_data.shape;
+
+            w,h,d = mri1.shape;
             new_w = math.ceil(w / config.hyperparameters['crop_size_w']) * config.hyperparameters['crop_size_w'];
             new_h = math.ceil(h / config.hyperparameters['crop_size_h']) * config.hyperparameters['crop_size_h'];
             new_d = math.ceil(d / config.hyperparameters['crop_size_d']) * config.hyperparameters['crop_size_d'];
 
-            fixed_image_data_padded  = torch.zeros((new_w, new_h, new_d), dtype = fixed_image_data.dtype);
-            rigid_registered_image_data_padded  = torch.zeros((new_w, new_h, new_d), dtype = fixed_image_data.dtype);
+            mri1_padded  = np.zeros((new_w, new_h, new_d), dtype = mri1.dtype);
+            mri2_padded  = np.zeros((new_w, new_h, new_d), dtype = mri2.dtype);
             gt_padded  = np.zeros((new_w, new_h, new_d), dtype = gt.dtype);
             brainmask_padded  = np.zeros((new_w, new_h, new_d), dtype = brainmask.dtype);
 
-            fixed_image_data_padded[:w,:h,:d] = fixed_image_data;
-            rigid_registered_image_data_padded[:w,:h,:d] = rigid_registered_image_data;
+            mri1_padded[:w,:h,:d] = mri1;
+            mri2_padded[:w,:h,:d] = mri2;
             gt_padded[:w,:h,:d] = gt;
             brainmask_padded[:w,:h,:d] = brainmask;
 
             step_w, step_h, step_d = config.hyperparameters['crop_size_w']//2, config.hyperparameters['crop_size_h']//2, config.hyperparameters['crop_size_d']//2;
-            fixed_image_data_patches = patchify(fixed_image_data_padded.numpy(), 
+            mri1_patches = patchify(mri1_padded, 
                                                 (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                 (step_w, step_h, step_d));
-            
-            rigid_registered_image_data_patches = patchify(rigid_registered_image_data_padded.numpy(), 
+            mri2_patches = patchify(mri2_padded, 
                                                 (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                 (step_w, step_h, step_d));
-            
             gt_patches = patchify(gt_padded, 
                                                 (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                 (step_w, step_h, step_d));
-            
             brainmask_patches = patchify(brainmask_padded, 
                                                 (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                 (step_w, step_h, step_d));
 
-            predicted_mri = np.zeros((new_w, new_h, new_d,3), dtype = np.float64);
-            predicted_mri_noisy = np.zeros((new_w, new_h, new_d), dtype = np.float64);
-            predicted_positive_thresh = np.zeros((new_w, new_h, new_d,1), dtype = np.float64);
-            predicted_negative_thresh = np.zeros((new_w, new_h, new_d,1), dtype = np.float64);
-            predicted_hm1_color = np.zeros((new_w, new_h, new_d,4), dtype = np.float64);
+            # mri1_patches = mri1_patches.reshape(mri1_patches.shape[0]*mri1_patches.shape[1]*mri1_patches.shape[2], mri1_patches.shape[3], mri1_patches.shape[4],mri1_patches.shape[5]);
+            # mri2_patches = mri2_patches.reshape(mri2_patches.shape[0]*mri2_patches.shape[1]*mri2_patches.shape[2], mri2_patches.shape[3], mri2_patches.shape[4],mri2_patches.shape[5]);
+            # gt_patches = gt_patches.reshape(gt_patches.shape[0]*gt_patches.shape[1]*gt_patches.shape[2], gt_patches.shape[3], gt_patches.shape[4],gt_patches.shape[5]);
+            # brainmask_patches = brainmask_patches.reshape(brainmask_patches.shape[0]*brainmask_patches.shape[1]*brainmask_patches.shape[2], brainmask_patches.shape[3], brainmask_patches.shape[4],brainmask_patches.shape[5]);
             predicted_aggregated = np.zeros((new_w, new_h, new_d), dtype = np.int32);
             predicted_aggregated_count = np.zeros((new_w, new_h, new_d), dtype = np.int32);
-            for i in range(fixed_image_data_patches.shape[0]):
-                for j in range(fixed_image_data_patches.shape[1]):
-                    for k in range(fixed_image_data_patches.shape[2]):
-                        #trans_ret = crop({'image1': fixed_image_data, 'image2': rigid_registered_image_data, 'mask1': fixed_image_data_mask, 'mask2': rigid_registered_image_data_mask});
+            # # data = [];
+            # for i in range(mri2_patches.shape[0]):
+            #     if np.sum(mri1_patches[i]) != 0 and np.sum(mri2_patches[i]) != 0:
+            #         data.append((mri1_patches[i],mri2_patches[i],gt_patches[i], 0 if np.sum(gt_patches[i]) == 0 else 1, brainmask_patches[i]))
 
-                        fixed_image_data_trans = torch.from_numpy(fixed_image_data_patches[i,j,k,:,:,:]);
-                        rigid_registered_image_data_trans = torch.from_numpy(rigid_registered_image_data_patches[i,j,k,:,:,:]);
-                        gt_lbl = np.sum(gt_patches[i,j,k,:,:,:]);
-                        heatmap = torch.from_numpy(gt_patches[i,j,k,:,:,:]);
-                        brainmask = torch.from_numpy(brainmask_patches[i,j,k,:,:,:]).to('cuda');
+            # return data;
+            total_pred = [];
+            for i in range(mri1_patches.shape[0]):
+                for j in range(mri1_patches.shape[1]):
+                    for k in range(mri1_patches.shape[2]):
+                #         #trans_ret = crop({'image1': fixed_image_data, 'image2': rigid_registered_image_data, 'mask1': fixed_image_data_mask, 'mask2': rigid_registered_image_data_mask});
+                #         if np.sum(mri1_patches[i,j,k,:,:,:]) != 0 and np.sum(mri2_patches[i,j,k,:,:,:]) != 0:
+                            
+                        
+                # mri1_patches_trans = torch.from_numpy(mri1_patches[i,j,k,:,:,:]);
+                # mri2_patches_trans = torch.from_numpy(mri2_patches[i,j,k,:,:,:]);
+                # gt_lbl = 0 if np.sum(gt_patches[i,j,k,:,:,:]) == 0 else 1;
+                # heatmap = torch.from_numpy(gt_patches[i,j,k,:,:,:]);
+                # brainmask = torch.from_numpy(brainmask_patches[i,j,k,:,:,:]).to('cuda');
+
+                # mri1_patches_trans = normalize_internsity(mri1_patches_trans);
+
+                # #mri2_c = self.augment_noisy_image(mri2_c);
+                # mri2_patches_trans = normalize_internsity(mri2_patches_trans);
+
+                        mri1, mri2, ret_gt, gt_lbl, brainmask = mri1_patches[i,j,k,:,:,:], mri2_patches[i,j,k,:,:,:], gt_patches[i,j,k,:,:,:], 0 if np.sum(gt_patches[i,j,k,:,:,:]) == 0 else 1, brainmask_patches[i,j,k,:,:,:];
+
+                        mri1 = np.expand_dims(mri1, axis=0);
+                        mri2 = np.expand_dims(mri2, axis=0);
+                        ret_gt = np.expand_dims(ret_gt, axis=0);
+
+                        ret_mri1 = normalize_internsity(mri1);
+                        ret_mri2 = normalize_internsity(mri2);
+
+                        ret_gt = torch.from_numpy(ret_gt).to('cuda').unsqueeze(dim=0)
+                        brainmask = torch.from_numpy(brainmask).to('cuda');
 
                         
 
-                        mri, mri_noisy = fixed_image_data_trans.to('cuda').unsqueeze(dim=0).unsqueeze(dim=0), rigid_registered_image_data_trans.to('cuda').unsqueeze(dim=0).unsqueeze(dim=0);
+                        mri, mri_noisy = ret_mri1.to('cuda').unsqueeze(dim=0), ret_mri2.to('cuda').unsqueeze(dim=0);
                         #mri_mask, mri_noisy_mask = fixed_image_data_mask_trans.to('cuda'), rigid_registered_image_data_mask_trans.to('cuda');
                         hm1 = model(mri, mri_noisy);
                         hm2 = model(mri_noisy, mri);
-
                         pred_lbl_1 = torch.sigmoid(hm1)>0.5;
                         pred_lbl_2 = torch.sigmoid(hm2)>0.5;
-                        pred = (pred_lbl_1 * pred_lbl_2);
+                        pred = pred_lbl_1 * pred_lbl_2 * brainmask;
+
+                        s = torch.sum(pred);
+
+                        #gt_lbl = torch.sum(pred).item()>0;
+                        if gt_lbl == 1:
+                            dice = DiceLoss()(pred, ret_gt);
+                            total_dice.append(dice.item());
+                        if gt_lbl ==0 and s > 0:
+                            print('a');
+                        
                         hm1 = hm1.detach().cpu().numpy();
                         hm2 = hm2.detach().cpu().numpy();
                         mri = mri.detach().cpu().numpy();
@@ -643,51 +685,53 @@ def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cac
                         predicted_aggregated[i*step_w:i*step_w + config.hyperparameters['crop_size_w'], 
                                     j*step_h:(j)*step_h + config.hyperparameters['crop_size_h'], 
                                     k*step_d:(k)*step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
-                        
+                
                         predicted_aggregated_count[i*step_w:i*step_w + config.hyperparameters['crop_size_w'], 
                                     j*step_h:(j)*step_h + config.hyperparameters['crop_size_h'], 
                                     k*step_d:(k)*step_d + config.hyperparameters['crop_size_d']] += np.ones((config.hyperparameters['crop_size_w'], 
-                                                                                                             config.hyperparameters['crop_size_h'], 
-                                                                                                             config.hyperparameters['crop_size_d']), dtype=np.int32);
-                        
-                        if gt_lbl > 0:
-                            heatmap = heatmap.detach().cpu().numpy();
-                            pred = pred.detach().cpu().numpy();
-                            for j in range(1):
-                                #heatmap = (1-heatmap) > 0;
-                                pos_cords = np.where(heatmap >0);
-                                if len(pos_cords[0]) != 0:
-                                    r = np.random.randint(0,len(pos_cords[0]));
-                                    center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
-                                else:
-                                    center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
-                                fig, ax = plt.subplots(2,6);
-                                ax[0][0].imshow(pred[0,0,center[0], :, :], cmap='hot');
-                                ax[0][1].imshow(pred[0,0,:,center[1], :], cmap='hot');
-                                ax[0][2].imshow(pred[0,0, :, :,center[2]], cmap='hot');
+                                                                                                            config.hyperparameters['crop_size_h'], 
+                                                                                                            config.hyperparameters['crop_size_d']), dtype=np.int32);
+                
+                # if gt_lbl > 0:
+                #     heatmap = heatmap.detach().cpu().numpy();
+                #     pred = pred.detach().cpu().numpy();
+                #     for j in range(1):
+                #         #heatmap = (1-heatmap) > 0;
+                #         pos_cords = np.where(heatmap >0);
+                #         if len(pos_cords[0]) != 0:
+                #             r = np.random.randint(0,len(pos_cords[0]));
+                #             center = [pos_cords[0][r], pos_cords[1][r],pos_cords[2][r]]
+                #         else:
+                #             center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
+                #         fig, ax = plt.subplots(2,6);
+                #         ax[0][0].imshow(pred[0,0,center[0], :, :], cmap='hot');
+                #         ax[0][1].imshow(pred[0,0,:,center[1], :], cmap='hot');
+                #         ax[0][2].imshow(pred[0,0, :, :,center[2]], cmap='hot');
 
-                                ax[0][3].imshow(heatmap[center[0], :, :]);
-                                ax[0][4].imshow(heatmap[:,center[1], :]);
-                                ax[0][5].imshow(heatmap[:, :,center[2]]);
+                #         ax[0][3].imshow(heatmap[center[0], :, :]);
+                #         ax[0][4].imshow(heatmap[:,center[1], :]);
+                #         ax[0][5].imshow(heatmap[:, :,center[2]]);
 
-                                ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
-                                ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
-                                ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
+                #         ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
+                #         ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
+                #         ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
 
-                                ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
-                                ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
-                                ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
+                #         ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
+                #         ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
+                #         ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
 
-                                fig.savefig(os.path.join('samples',f'sample_{counter}_{j}.png'));
-                                plt.close("all");
+                #         fig.savefig(os.path.join('samples',f'sample_{counter}_{j}.png'));
+                #         plt.close("all");
 
-                                counter +=1;
-        m = np.max(predicted_aggregated_count);                
-        final_pred = np.where(predicted_aggregated>predicted_aggregated_count//2,1,0)
+        
+        #m = np.max(predicted_aggregated_count);                
+        final_pred = np.where(predicted_aggregated>predicted_aggregated_count//2,1,0);
         gt_padded = torch.from_numpy(gt_padded)
         final_pred = torch.from_numpy(final_pred)
+        gt_lbl = torch.sum(gt_padded);
         dice = DiceLoss()(final_pred.unsqueeze(0).unsqueeze(0), gt_padded.unsqueeze(0).unsqueeze(0));
-        return dice;
+        d = np.mean(total_dice);
+        return dice, gt_lbl;
 
 if __name__ == "__main__":
     #cache_dataset();
@@ -714,16 +758,19 @@ if __name__ == "__main__":
 
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{0}.fold'), 'rb'));
 
+    model.eval();
     #predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
     total_dice = [];
-    for i in range(len(test_ids)):
-        dice = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
+    for i in range(5,len(test_ids)):
+        dice, gt_lbl = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
                        f'{test_ids[i]}\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
-        if dice < 0.9:
-            total_dice.append(dice);
+        #total_data.extend(data);
+        if gt_lbl.item() > 0:
+            if dice < 0.98:
+                total_dice.append(dice);
     print(np.mean(total_dice));
 
-    # train_loader, test_loader = get_loader_miccai(0);
+    train_loader, test_loader = get_loader_miccai(0);
     
     # model.eval();
-    # valid_loss = valid(model, test_loader);
+    valid_loss = valid(model, test_loader, total_data);
