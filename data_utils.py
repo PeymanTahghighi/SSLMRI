@@ -301,9 +301,12 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
             for patient_path in mr_images:
 
                 mri = nib.load(patient_path);
+                gradient_file_path = patient_path[:patient_path.find('.')];
                 mri = mri.get_fdata();
                 mri = window_center_adjustment(mri);
-                self.mr_images.append(mri)
+
+                gradient = pickle.load(open(f'{gradient_file_path}.gradient', 'rb'));
+                self.mr_images.append([mri, gradient])
 
         else:
             for mr in mr_images:
@@ -319,14 +322,14 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
             # mrimage = nib.as_closest_canonical(mrimage);
             # mrimage = mrimage.get_fdata()
             # mrimage = window_center_adjustment(mrimage);
-            mrimage = self.mr_images[index];
+            mrimage, gr = self.mr_images[index];
             mask = mrimage > threshold_otsu(mrimage);            
             mask = np.expand_dims(mask, axis=0);
             mrimage = np.expand_dims(mrimage, axis=0);
             mrimage = mrimage / (np.max(mrimage)+1e-4);
 
-            gr = sobel(mrimage);
-            g = (mrimage > 0.9) * (gr<threshold_otsu(gr));
+           # gr = sobel(mrimage);
+            g = (mrimage > 0.9) * (gr);
             
 
             ret_mrimage = None;
@@ -885,6 +888,18 @@ def add_synthetic_lesion_wm(img, mask_g):
 def cache_mri_gradients():
     patient_ids = glob(os.path.join('miccai-processed/*/'));
     for p in tqdm(patient_ids):
+        patient_path = os.path.join(p, 'flair_time01_on_middle_space.nii.gz');
+
+        file_name = os.path.basename(patient_path);
+        file_name = file_name[:file_name.find('.')];
+        mrimage = nib.load(patient_path)
+        mrimage = mrimage.get_fdata()
+        mrimage = window_center_adjustment(mrimage);
+        mrimage = mrimage / np.max(mrimage);
+        g = sobel(mrimage);
+        g = g < threshold_otsu(g);
+        pickle.dump(g, open(os.path.join(p, f'flair_time01_on_middle_space.gradient'), 'wb'));
+
         patient_path = os.path.join(p, 'flair_time02_on_middle_space.nii.gz');
 
         file_name = os.path.basename(patient_path);
@@ -893,9 +908,9 @@ def cache_mri_gradients():
         mrimage = mrimage.get_fdata()
         mrimage = window_center_adjustment(mrimage);
         mrimage = mrimage / np.max(mrimage);
-        g = gradient(mrimage);
-        g = g > threshold_otsu(g);
-        pickle.dump(g, open(os.path.join(p, f'gradient.gradient'), 'wb'));
+        g = sobel(mrimage);
+        g = g < threshold_otsu(g);
+        pickle.dump(g, open(os.path.join(p, f'flair_time02_on_middle_space.gradient'), 'wb'));
 
 
 def gradient(mri):
