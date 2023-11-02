@@ -603,10 +603,10 @@ class MICCAI_Dataset(Dataset):
                 total_heatmap_thresh = torch.clamp(total_heatmap_thresh, 0, 1);
 
                 pos_dt = distance_transform_edt(np.where(total_heatmap_thresh.squeeze().numpy()==1, 0, 1));
-                pos_dt = pos_dt/np.max(pos_dt);
+                pos_dt = pos_dt/(np.max(pos_dt)+1e-4);
 
                 neg_dt = distance_transform_edt(total_heatmap_thresh.squeeze().numpy()==1);
-                neg_dt = neg_dt/np.max(neg_dt);
+                neg_dt = neg_dt/(np.max(neg_dt)+1e-4);
 
                 dt = pos_dt - neg_dt ;
                 dt = torch.from_numpy(np.expand_dims(dt, axis = 0));
