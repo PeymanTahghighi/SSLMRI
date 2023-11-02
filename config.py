@@ -8,6 +8,7 @@ hyperparameters = {
     'learning_rate':1e-3,
     'sample_per_mri':8,
     'deterministic':False,
-    'virtual_batch_size':1
+    'virtual_batch_size':1,
+    'num_workers':8,
 }
-DEBUG_TRAIN_DATA = True;
+DEBUG_TRAIN_DATA = False;

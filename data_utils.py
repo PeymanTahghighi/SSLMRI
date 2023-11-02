@@ -17,7 +17,7 @@ from tqdm import tqdm
 import math
 from patchify import patchify
 import seaborn as sns
-from scipy.ndimage import distance_transform_edt, sobel, histogram, prewitt,laplace
+from scipy.ndimage import distance_transform_edt, sobel, histogram, prewitt,laplace, gaussian_filter
 
 
 def window_center_adjustment(img):
@@ -583,30 +583,24 @@ class MICCAI_Dataset(Dataset):
 
                 total_heatmap = torch.zeros_like(mri2_c, dtype=torch.float64);
 
-                
-                gr_c = torch.from_numpy(sobel(mri2_c));
-                gr_c = gr_c > threshold_otsu(gr_c.numpy())
-                g = torch.where(mri2_c>t, 0, 1) * mri2_c > threshold_otsu(mri2_c.numpy()) * gr_c;
+                gr_c = (np.abs(sobel(gaussian_filter(mri2_c, 1))));
+                gr_c = torch.from_numpy(gr_c < threshold_otsu(gr_c))
+                t1 =  torch.where(mri2_c>t, 0, 1);
+                t2 = (mri2_c > threshold_otsu(mri2_c.numpy()));
+                g = t1 * t2 * (gr_c);
                 g = g.numpy();
 
                 g = binary_opening(g.squeeze(), structure=np.ones((3,3,3))).astype(g.dtype)
                 g = torch.from_numpy(np.expand_dims(g, axis=0));
+
                 
                 num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
                 for i in range(num_corrupted_patches):
                     mri2_c, heatmap = add_synthetic_lesion_wm(mri2_c, g)
                     total_heatmap = torch.clamp(heatmap+total_heatmap, 0, 1);
-                
-                #mri1_c = self.transforms(mri1_c);
-
-                #mri2_c = self.augment_noisy_image(mri2_c);
-                #mri2_c = self.transforms(mri2_c);
 
                 total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
-                total_heatmap_thresh = torch.clamp(gt_c, 0, 1);
-
-                pos_mask = np.where(total_heatmap_thresh.squeeze().numpy()==1, 0, 1);
-                neg_mask = np.where(total_heatmap_thresh.squeeze().numpy()==1, 1, 0);
+                total_heatmap_thresh = torch.clamp(total_heatmap_thresh, 0, 1);
 
                 pos_dt = distance_transform_edt(np.where(total_heatmap_thresh.squeeze().numpy()==1, 0, 1));
                 pos_dt = pos_dt/np.max(pos_dt);
@@ -619,12 +613,16 @@ class MICCAI_Dataset(Dataset):
                 
                 if config.DEBUG_TRAIN_DATA:
                     pos_cords = np.where(total_heatmap_thresh >0.0);
-                    # if len(pos_cords[0]) != 0:
-                    #     r = np.random.randint(0,len(pos_cords[0]));
-                    #     center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
-                    # else:
-                    center=[mri2_c.shape[1]//2, mri2_c.shape[2]//2, mri2_c.shape[3]//2]
-                    visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, dt, g, gr_c], center);
+                    if len(pos_cords[0]) != 0:
+                        r = np.random.randint(0,len(pos_cords[0]));
+                        center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+                    else:
+                        center=[mri2_c.shape[1]//2, mri2_c.shape[2]//2, mri2_c.shape[3]//2]
+                    visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, dt, g, gr_c, t2, t1], center);
+                mri1_c = self.transforms(mri1_c);
+
+                #mri2_c = self.augment_noisy_image(mri2_c);
+                mri2_c = self.transforms(mri2_c);
 
                 if ret_mri1 is None:
                     ret_mri1 = mri1_c.unsqueeze(dim=0);
@@ -730,10 +728,10 @@ def get_loader(fold):
     train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
 
     mri_dataset_train = MRI_Dataset(train_mri);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=0, pin_memory=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
     test_mri = glob(os.path.join('cache',f'{fold}','*.tstd'));
     mri_dataset_test = MRI_Dataset(test_mri, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
     return train_loader, test_loader;   
 
@@ -748,10 +746,10 @@ def get_loader_pretrain_miccai(fold):
         mri_paths.append(os.path.join(t, 'flair_time02_on_middle_space.nii.gz'));
 
     mri_dataset_train = MICCAI_PRETRAIN_Dataset(mri_paths);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=8, pin_memory=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
     test_mri = glob(os.path.join('cache_miccai',f'{fold}','*.tstd'));
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=8, pin_memory=True);
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri[:1], train=False);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
     return train_loader, test_loader; 
 
@@ -759,10 +757,10 @@ def get_loader_miccai(fold):
     
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{fold}.fold'), 'rb'));
 
-    mri_dataset_train = MICCAI_Dataset(train_ids[:1], train=True);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=0, pin_memory=True);
-    mri_dataset_test = MICCAI_Dataset(test_ids[:1], train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
+    mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
+    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
     return train_loader, test_loader; 
 

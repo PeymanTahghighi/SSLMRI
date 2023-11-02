@@ -448,19 +448,19 @@ if __name__ == "__main__":
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_loader = get_loader_pretrain_miccai(0);
+    train_loader, test_loader = get_loader_miccai(0);
     sample_output_interval = 10;
     for epoch in range(start_epoch, 1000):
         model.train();
-        train_loss = train_miccai_pretrain(model, train_loader, optimizer, scalar); 
+        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
         model.eval();
-        valid_loss = valid_pretrain_miccai(model, test_loader);
+        valid_loss = valid_miccai(model, test_loader);
         summary_writer.add_scalar('train/loss', train_loss, epoch);
         summary_writer.add_scalar('valid/loss', valid_loss, epoch);
         if epoch %sample_output_interval == 0:
             print('sampling outputs...');
-            save_examples(model, test_loader);
+            save_examples_miccai(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
