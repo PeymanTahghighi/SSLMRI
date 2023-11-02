@@ -600,7 +600,7 @@ class MICCAI_Dataset(Dataset):
                     total_heatmap = torch.clamp(heatmap+total_heatmap, 0, 1);
 
                 total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
-                total_heatmap_thresh = torch.clamp(total_heatmap_thresh, 0, 1);
+                total_heatmap_thresh = torch.clamp(total_heatmap_thresh + gt_c, 0, 1);
 
                 # pos_dt = distance_transform_edt(np.where(total_heatmap_thresh.squeeze().numpy()==1, 0, 1));
                 # pos_dt = pos_dt/(np.max(pos_dt)+1e-4);
@@ -618,7 +618,7 @@ class MICCAI_Dataset(Dataset):
                         center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
                     else:
                         center=[mri2_c.shape[1]//2, mri2_c.shape[2]//2, mri2_c.shape[3]//2]
-                    visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, dt, g, gr_c, t2, t1], center);
+                    visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, g, gr_c, t2, t1], center);
                 mri1_c = self.transforms(mri1_c);
 
                 #mri2_c = self.augment_noisy_image(mri2_c);
