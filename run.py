@@ -262,14 +262,14 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = GeneralizedDiceLoss(sigmoid=True)(hm1, curr_heatmap);
-                lhf2 = GeneralizedDiceLoss(sigmoid=True)(hm2, curr_heatmap);
+                lhf1 = GeneralizedDiceFocalLoss(sigmoid=True)(hm1, curr_heatmap);
+                lhf2 = GeneralizedDiceFocalLoss(sigmoid=True)(hm2, curr_heatmap);
 
-                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*10;
-                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*10;
+                #lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*10;
+                #lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*10;
                # lhd2 = dice_loss(hm2, curr_heatmap);
                 lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
-                loss = (lhf1 + lhf2 + lhh + lhb1 + lhb2)/ config.hyperparameters['virtual_batch_size'];
+                loss = (lhf1 + lhf2 + lhh)/ config.hyperparameters['virtual_batch_size'];
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
