@@ -239,7 +239,7 @@ def train_miccai(model, train_loader, optimizer, scalar):
     curr_step = 0;
     curr_iou = 0;
     for batch_idx, (batch) in pbar:
-        mri, mri_noisy, heatmap = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(dim=0)#,batch[3].to('cuda').squeeze(dim=0)
+        mri, mri_noisy, heatmap, distance_transform = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(dim=0),batch[3].to('cuda').squeeze(dim=0)
 
         steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
         curr_loss = 0;
@@ -247,7 +247,7 @@ def train_miccai(model, train_loader, optimizer, scalar):
             curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            #curr_distance_transform = distance_transform[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_distance_transform = distance_transform[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
             assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
             with torch.cuda.amp.autocast_mode.autocast():
@@ -262,14 +262,13 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = GeneralizedDiceFocalLoss(sigmoid=True)(hm1, curr_heatmap);
-                lhf2 = GeneralizedDiceFocalLoss(sigmoid=True)(hm2, curr_heatmap);
+                lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
+                lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
 
-                #lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*10;
-                #lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*10;
-               # lhd2 = dice_loss(hm2, curr_heatmap);
+                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*10;
+                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*10;
                 lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
-                loss = (lhf1 + lhf2 + lhh)/ config.hyperparameters['virtual_batch_size'];
+                loss = (lhf1 + lhf2 + lhh + lhb1 + lhb2)/ config.hyperparameters['virtual_batch_size'];
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
@@ -450,6 +449,7 @@ if __name__ == "__main__":
 
     train_loader, test_loader = get_loader_miccai(0);
     sample_output_interval = 10;
+    print(LOG_MESSAGE);
     for epoch in range(start_epoch, 1000):
         model.train();
         train_loss = train_miccai(model, train_loader, optimizer, scalar); 

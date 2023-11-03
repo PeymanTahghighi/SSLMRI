@@ -602,14 +602,14 @@ class MICCAI_Dataset(Dataset):
                 total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
                 total_heatmap_thresh = torch.clamp(total_heatmap_thresh + gt_c, 0, 1);
 
-                # pos_dt = distance_transform_edt(np.where(total_heatmap_thresh.squeeze().numpy()==1, 0, 1));
-                # pos_dt = pos_dt/(np.max(pos_dt)+1e-4);
+                pos_dt = distance_transform_edt(np.where(total_heatmap_thresh.squeeze().numpy()==1, 0, 1));
+                pos_dt = pos_dt/(np.max(pos_dt)+1e-4);
 
-                # neg_dt = distance_transform_edt(total_heatmap_thresh.squeeze().numpy()==1);
-                # neg_dt = neg_dt/(np.max(neg_dt)+1e-4);
+                neg_dt = distance_transform_edt(total_heatmap_thresh.squeeze().numpy()==1);
+                neg_dt = neg_dt/(np.max(neg_dt)+1e-4);
 
-                # dt = pos_dt - neg_dt ;
-                # dt = torch.from_numpy(np.expand_dims(dt, axis = 0));
+                dt = pos_dt - neg_dt ;
+                dt = torch.from_numpy(np.expand_dims(dt, axis = 0));
                 
                 if config.DEBUG_TRAIN_DATA:
                     pos_cords = np.where(total_heatmap_thresh >0.0);
@@ -628,15 +628,15 @@ class MICCAI_Dataset(Dataset):
                     ret_mri1 = mri1_c.unsqueeze(dim=0);
                     ret_mri2 = mri2_c.unsqueeze(dim=0);
                     ret_gt = total_heatmap_thresh.unsqueeze(dim=0);
-                    #ret_dt = dt.unsqueeze(dim=0);
+                    ret_dt = dt.unsqueeze(dim=0);
                 else:
                     ret_mri1 = torch.concat([ret_mri1, mri1_c.unsqueeze(dim=0)], dim=0);
                     ret_mri2 = torch.concat([ret_mri2, mri2_c.unsqueeze(dim=0)], dim=0);
                     ret_gt = torch.concat([ret_gt, total_heatmap_thresh.unsqueeze(dim=0)], dim=0);
-                   # ret_dt = torch.concat([ret_dt, dt.unsqueeze(dim=0)], dim=0);
+                    ret_dt = torch.concat([ret_dt, dt.unsqueeze(dim=0)], dim=0);
 
         
-            return ret_mri1, ret_mri2, ret_gt#, ret_dt;
+            return ret_mri1, ret_mri2, ret_gt, ret_dt;
        
         else:
             mri1, mri2, ret_gt, lbl, brainmask = self.data[index];
