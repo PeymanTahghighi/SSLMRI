@@ -262,11 +262,12 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
-                lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
+                lhf1 = GeneralizedDiceLoss(sigmoid=True)(hm1, curr_heatmap);
+                lhf2 = GeneralizedDiceLoss(sigmoid=True)(hm2, curr_heatmap);
 
                 lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*10;
                 lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*10;
+               # lhd2 = dice_loss(hm2, curr_heatmap);
                 lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
                 loss = (lhf1 + lhf2 + lhh + lhb1 + lhb2)/ config.hyperparameters['virtual_batch_size'];
 
@@ -300,43 +301,44 @@ def train_miccai_pretrain(model, train_loader, optimizer, scalar):
     curr_iou = 0;
     for batch_idx, (batch) in pbar:
         mri, mri_noisy, heatmap = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(0)
-        steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
-        curr_loss = 0;
-        for s in range(steps):
-            curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+    #     steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
+    #     curr_loss = 0;
+    #     for s in range(steps):
+    #         curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+    #         curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+    #         curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
-            assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
-            with torch.cuda.amp.autocast_mode.autocast():
-                hm1 = model(curr_mri, curr_mri_noisy);
-                hm2 = model(curr_mri_noisy, curr_mri);
-                lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
-                lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
-                lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
-                lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
-                lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
-                loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
+    #         assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
+    #         with torch.cuda.amp.autocast_mode.autocast():
+    #             hm1 = model(curr_mri, curr_mri_noisy);
+    #             hm2 = model(curr_mri_noisy, curr_mri);
+    #             lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
+    #             lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
+    #             lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
+    #             lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
+    #             lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
+    #             loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
 
-            scalar.scale(loss).backward();
-            curr_loss += loss.item();
-            curr_step+=1;
+    #         scalar.scale(loss).backward();
+    #         curr_loss += loss.item();
+    #         curr_step+=1;
 
 
-            if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
-                scalar.step(optimizer);
-                scalar.update();
+    #         if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
+    #             scalar.step(optimizer);
+    #             scalar.update();
                 
-                model.zero_grad(set_to_none = True);
-                epoch_loss.append(curr_loss);
-                epoch_IoU.append(curr_iou);
-                curr_loss = 0;
-                curr_step = 0;
-                curr_iou = 0;
+    #             model.zero_grad(set_to_none = True);
+    #             epoch_loss.append(curr_loss);
+    #             epoch_IoU.append(curr_iou);
+    #             curr_loss = 0;
+    #             curr_step = 0;
+    #             curr_iou = 0;
 
-            pbar.set_description(('%10s' + '%10.4g'*1)%(epoch, np.mean(epoch_loss)));
+    #         pbar.set_description(('%10s' + '%10.4g'*1)%(epoch, np.mean(epoch_loss)));
 
-    return np.mean(epoch_loss);
+    # return np.mean(epoch_loss);
+    return 0;
 
 def valid_miccai(model, loader):
     print(('\n' + '%10s'*5) %('Epoch', 'Dice', 'Prec', 'Rec', 'F1'));
@@ -415,8 +417,8 @@ if __name__ == "__main__":
     #update_folds_miccai();
     #cache_test_dataset_miccai(200,0);
 
-    EXP_NAME = 'BL+DICE_NEW_AUGMENTATION';
-    LOG_MESSAGE = 'BL+DICE NEW AUGMENTATION'
+    EXP_NAME = 'pretrain-miccai';
+    LOG_MESSAGE = 'pretrain model'
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
@@ -447,20 +449,19 @@ if __name__ == "__main__":
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_loader = get_loader_miccai(0);
+    train_loader, test_loader = get_loader_pretrain_miccai(0);
     sample_output_interval = 10;
-    print(LOG_MESSAGE);
     for epoch in range(start_epoch, 1000):
         model.train();
-        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
+        train_loss = train_miccai_pretrain(model, train_loader, optimizer, scalar); 
         
         model.eval();
-        valid_loss = valid_miccai(model, test_loader);
+        valid_loss = valid_pretrain_miccai(model, test_loader);
         summary_writer.add_scalar('train/loss', train_loss, epoch);
         summary_writer.add_scalar('valid/loss', valid_loss, epoch);
         if epoch %sample_output_interval == 0:
             print('sampling outputs...');
-            save_examples_miccai(model, test_loader);
+            save_examples(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
@@ -469,7 +470,7 @@ if __name__ == "__main__":
             'epoch': epoch+1
         }
         torch.save(ckpt,os.path.join('exp', EXP_NAME, 'resume.ckpt'));
-        lr_scheduler.step();
+        #lr_scheduler.step();
 
         if best_loss > valid_loss:
             print(f'new best model found: {valid_loss}')

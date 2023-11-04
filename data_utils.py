@@ -70,7 +70,7 @@ def cache_test_dataset_miccai(num_data, fold):
     num_data = math.ceil(num_data/len(test_loader));
     counter = 0;
     ret = [];
-    for n in range(num_data):
+    for n in tqdm(range(num_data)):
         for (batch) in test_loader:
             ret.append(os.path.join('cache_miccai',f'{fold}', f'{counter}.tstd'))
             pickle.dump([b.squeeze() for b in batch], open(os.path.join('cache_miccai',f'{fold}', f'{counter}.tstd'), 'wb'));
@@ -278,8 +278,8 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
         self.augment_noisy_image = OneOf([
             RandGaussianSmooth(prob=1.0, sigma_x=(m1,m2), sigma_y=(m1,m2), sigma_z=(m1,m2)),
             RandGaussianNoise(prob=1.0,std=0.05),
-            RandGibbsNoise(prob=1.0, alpha=(0.65,0.75))
-        ], weights=[1,1,1])
+           # RandGibbsNoise(prob=1.0, alpha=(0.65,0.75))
+        ], weights=[1,1])
 
 
         self.transforms = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
@@ -329,7 +329,11 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
             mrimage = mrimage / (np.max(mrimage)+1e-4);
 
            # gr = sobel(mrimage);
-            g = (mrimage > 0.9) * (gr);
+            g = (mrimage > 0.9) * gr;
+            g = binary_opening(g.squeeze(), structure=np.ones((2,2,2))).astype(g.dtype)
+            g = torch.from_numpy(np.expand_dims(g, axis=0));
+            #g = g < threshold_otsu(g);
+           # g = np.expand_dims(gr, axis=0);
             
 
             ret_mrimage = None;
@@ -371,12 +375,18 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                 #pos_cords = np.where(total_heatmap_thresh == 1);
                 #r = np.random.randint(0,len(pos_cords[0]));
                 #center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
-                total_heatmap_thresh = torch.where(total_heatmap > 0.9, 0.0, 1.0);
+                total_heatmap_thresh = torch.where(total_heatmap > 0.8, 1.0, 0.0);
+                part_first = mrimage_c * total_heatmap_thresh;
+                part_second = mrimage_noisy * total_heatmap_thresh;
                 if config.hyperparameters['deterministic'] is True:
                     mrimage_noisy = GibbsNoise(alpha = 0.65)(mrimage_noisy);
                 else:
                     mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
-                #visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, noise, g_c], center);
+
+                diff = torch.abs(part_first - part_second) > 0.2;
+                
+                if config.DEBUG_TRAIN_DATA:
+                    visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, total_heatmap_thresh, diff], center);
                 
                 
                 mrimage_c = self.transforms(mrimage_c)[0];
@@ -748,7 +758,7 @@ def get_loader_pretrain_miccai(fold):
     mri_dataset_train = MICCAI_PRETRAIN_Dataset(mri_paths);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
     test_mri = glob(os.path.join('cache_miccai',f'{fold}','*.tstd'));
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri[:1], train=False);
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
     return train_loader, test_loader; 
@@ -817,14 +827,13 @@ def inpaint_3d(img, mask_g):
     #cube = transform(cube);
     cube_thresh = (cube>0)
 
-    cube_thresh = GaussianSmooth(7, approx='erf')(cube_thresh);
+    cube_thresh = GaussianSmooth(4, approx='erf')(cube_thresh);
     cube_thresh = cube_thresh / (torch.max(cube_thresh) + 1e-4);
     #================
 
-    noise = GaussianSmooth(7)(mri);
-    final = (cube_thresh)*(noise);
+    noise = GaussianSmooth(11)(mri);
+    mri_after = (1-cube_thresh)*mri + (cube_thresh*noise);
     noise = GaussianSmooth(7)(mask_g.float());
-    mri_after = (1-cube_thresh)*mri + final;
     
     mri_after = torch.clip(mri_after, 0, 1);
     #mri_after = (mri_after*255).astype("uint8")
