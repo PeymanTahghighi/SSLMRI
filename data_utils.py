@@ -384,9 +384,11 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                     mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
 
                 diff = torch.abs(part_first - part_second) > 0.2;
+
                 
+                total_heatmap_thresh = torch.where(diff > 0, 0, 1);
                 if config.DEBUG_TRAIN_DATA:
-                    visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, total_heatmap_thresh, diff], center);
+                    visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, diff], center);
                 
                 
                 mrimage_c = self.transforms(mrimage_c)[0];
@@ -831,7 +833,7 @@ def inpaint_3d(img, mask_g):
     cube_thresh = cube_thresh / (torch.max(cube_thresh) + 1e-4);
     #================
 
-    noise = GaussianSmooth(11)(mri);
+    noise = GaussianSmooth(15)(mri);
     mri_after = (1-cube_thresh)*mri + (cube_thresh*noise);
     noise = GaussianSmooth(7)(mask_g.float());
     

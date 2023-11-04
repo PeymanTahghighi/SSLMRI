@@ -301,44 +301,44 @@ def train_miccai_pretrain(model, train_loader, optimizer, scalar):
     curr_iou = 0;
     for batch_idx, (batch) in pbar:
         mri, mri_noisy, heatmap = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(0)
-    #     steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
-    #     curr_loss = 0;
-    #     for s in range(steps):
-    #         curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-    #         curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-    #         curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+        steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
+        curr_loss = 0;
+        for s in range(steps):
+            curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
-    #         assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
-    #         with torch.cuda.amp.autocast_mode.autocast():
-    #             hm1 = model(curr_mri, curr_mri_noisy);
-    #             hm2 = model(curr_mri_noisy, curr_mri);
-    #             lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
-    #             lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
-    #             lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
-    #             lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
-    #             lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
-    #             loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
+            assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
+            with torch.cuda.amp.autocast_mode.autocast():
+                hm1 = model(curr_mri, curr_mri_noisy);
+                hm2 = model(curr_mri_noisy, curr_mri);
+                lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
+                lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
+                lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
+                lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
+                lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
+                loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
 
-    #         scalar.scale(loss).backward();
-    #         curr_loss += loss.item();
-    #         curr_step+=1;
+            scalar.scale(loss).backward();
+            curr_loss += loss.item();
+            curr_step+=1;
 
 
-    #         if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
-    #             scalar.step(optimizer);
-    #             scalar.update();
+            if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
+                scalar.step(optimizer);
+                scalar.update();
                 
-    #             model.zero_grad(set_to_none = True);
-    #             epoch_loss.append(curr_loss);
-    #             epoch_IoU.append(curr_iou);
-    #             curr_loss = 0;
-    #             curr_step = 0;
-    #             curr_iou = 0;
+                model.zero_grad(set_to_none = True);
+                epoch_loss.append(curr_loss);
+                epoch_IoU.append(curr_iou);
+                curr_loss = 0;
+                curr_step = 0;
+                curr_iou = 0;
 
-    #         pbar.set_description(('%10s' + '%10.4g'*1)%(epoch, np.mean(epoch_loss)));
+            pbar.set_description(('%10s' + '%10.4g'*1)%(epoch, np.mean(epoch_loss)));
 
-    # return np.mean(epoch_loss);
-    return 0;
+    return np.mean(epoch_loss);
+
 
 def valid_miccai(model, loader):
     print(('\n' + '%10s'*5) %('Epoch', 'Dice', 'Prec', 'Rec', 'F1'));
