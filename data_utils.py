@@ -772,10 +772,15 @@ def get_loader_miccai(fold):
 
     mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    #mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
-    #test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
+    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
-    return train_loader, test_ids; 
+    return train_loader, test_loader; 
+
+def standardize(img):
+    img = img - np.min(img);
+    img = (img / np.max(img))*255;
+    return img;
 
 def standardize(img):
     img = img - np.min(img);

@@ -12,3 +12,5 @@ hyperparameters = {
     'num_workers': 8
 }
 DEBUG_TRAIN_DATA = False;
+PRETRAINED = True
+PRERTRAIN_PATH = 'exp/pretrain-miccai/best_model.ckpt';

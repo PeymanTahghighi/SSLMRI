@@ -339,21 +339,30 @@ def train_miccai_pretrain(model, train_loader, optimizer, scalar):
 
     return np.mean(epoch_loss);
 
-def valid_miccai(model, test_ids):
-    print(('\n' + '%10s'*3) %('Epoch', 'Dice', 'HD'));
-   # pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+def valid_miccai(model, loader):
+    print(('\n' + '%10s'*5) %('Epoch', 'Dice', 'Prec', 'Rec', 'F1'));
+    pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     epoch_dice = [];
-    epoch_hd = [];
+    all_gt = [];
+    all_pred = [];
     with torch.no_grad():
-        for test_id  in tqdm(test_ids):
-            pred, gt = predict_on_miccai(test_id, model);
-            gt_lbl = torch.sum(gt);
-            dice = DiceLoss()(pred.unsqueeze(0).unsqueeze(0), gt.unsqueeze(0).unsqueeze(0));
+        for idx, (batch) in pbar:
+            mri, mri_noisy, heatmap, gt_lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].numpy()[0], batch[4].to('cuda');
 
-            if gt_lbl.item() > 0:
-                dice,hd  = calculate_metric_percase(pred.squeeze().numpy(), gt.squeeze().numpy());
-                epoch_dice.append(dice);
-                epoch_hd.append(hd);
+            hm1 = model(mri, mri_noisy);
+            hm2 = model(mri_noisy, mri);
+            pred_lbl_1 = torch.sigmoid(hm1)>0.5;
+            pred_lbl_2 = torch.sigmoid(hm2)>0.5;
+            pred = pred_lbl_1 * pred_lbl_2 * brainmask;
+            pred_lbl = torch.sum(pred).item()>0;
+            if gt_lbl == 1:
+                dice = DiceLoss()(pred, heatmap);
+                epoch_dice.append(dice.item());
+            all_gt.append(gt_lbl);
+            all_pred.append(pred_lbl);
+
+            prec,rec,f1,_ = precision_recall_fscore_support(all_gt, all_pred, zero_division=0.0,average='binary');
+
 
             # #For regression
             # hm2 = model(mri_noisy, mri);
@@ -366,9 +375,8 @@ def valid_miccai(model, test_ids):
             # #==============================================
 
             
+            pbar.set_description(('%10s' + '%10.4g'*4)%(epoch, 0 if len(epoch_dice) == 0 else np.mean(epoch_dice), prec, rec, f1));
 
-    print(('%10s' + '%10.4g'*2)%(epoch, np.mean(epoch_dice),
-                                                    np.mean(epoch_hd)));
     return np.mean(epoch_dice);
 
 
@@ -408,8 +416,8 @@ if __name__ == "__main__":
     #update_folds_miccai();
     #cache_test_dataset_miccai(200,0);
 
-    EXP_NAME = 'BL+DICE_NEW_AUGMENTATION';
-    LOG_MESSAGE = 'BL+DICE NEW AUGMENTATION'
+    EXP_NAME = 'BL+DICE_NEW_AUGMENTATION-PRETRAINED';
+    LOG_MESSAGE = 'BL+DICE NEW AUGMENTATION-PRETRAINED'
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
@@ -419,6 +427,9 @@ if __name__ == "__main__":
         strides=(2, 2, 2),
         num_res_units=2,
         ).to('cuda')
+    if config.PRETRAINED:
+        ckpt = torch.load(config.PRERTRAIN_PATH);
+        model.load_state_dict(ckpt['model']);
     
     if RESUME is True:
         ckpt = torch.load(os.path.join('exp', EXP_NAME, 'resume.ckpt'));
@@ -440,7 +451,7 @@ if __name__ == "__main__":
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_ids = get_loader_miccai(0);
+    train_loader, test_loader = get_loader_miccai(0);
     sample_output_interval = 10;
     print(LOG_MESSAGE);
     for epoch in range(start_epoch, 1000):
@@ -448,12 +459,12 @@ if __name__ == "__main__":
         train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
         model.eval();
-        valid_loss = valid_miccai(model, test_ids);
+        valid_loss = valid_miccai(model, test_loader);
         summary_writer.add_scalar('train/loss', train_loss, epoch);
         summary_writer.add_scalar('valid/loss', valid_loss, epoch);
-        # if epoch %sample_output_interval == 0:
-        #     print('sampling outputs...');
-        #     save_examples_miccai(model, test_loader);
+        if epoch %sample_output_interval == 0:
+            print('sampling outputs...');
+            save_examples_miccai(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
