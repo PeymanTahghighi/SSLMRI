@@ -1,4 +1,5 @@
 from data_utils import cache_test_dataset_miccai,cache_mri_gradients, get_loader_pretrain_miccai, get_loader, cache_test_dataset, update_folds, update_folds_isbi, visualize_2d, update_folds_miccai, get_loader_miccai
+from data_utils import predict_on_miccai
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
@@ -18,7 +19,7 @@ from monai.losses.dice import DiceLoss, DiceFocalLoss
 from monai.losses import GeneralizedDiceFocalLoss, GeneralizedDiceLoss
 from skimage.filters import threshold_otsu
 import seaborn as sns
-from utility import BounraryLoss
+from utility import BounraryLoss, calculate_metric_percase
 #===============================================================
 def dice_loss(input, 
                 target, 
@@ -262,12 +263,11 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = GeneralizedDiceLoss(sigmoid=True)(hm1, curr_heatmap);
-                lhf2 = GeneralizedDiceLoss(sigmoid=True)(hm2, curr_heatmap);
+                lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
+                lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
 
                 lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*10;
                 lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*10;
-               # lhd2 = dice_loss(hm2, curr_heatmap);
                 lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
                 loss = (lhf1 + lhf2 + lhh + lhb1 + lhb2)/ config.hyperparameters['virtual_batch_size'];
 
@@ -339,31 +339,21 @@ def train_miccai_pretrain(model, train_loader, optimizer, scalar):
 
     return np.mean(epoch_loss);
 
-
-def valid_miccai(model, loader):
-    print(('\n' + '%10s'*5) %('Epoch', 'Dice', 'Prec', 'Rec', 'F1'));
-    pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+def valid_miccai(model, test_ids):
+    print(('\n' + '%10s'*3) %('Epoch', 'Dice', 'HD'));
+   # pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     epoch_dice = [];
-    all_gt = [];
-    all_pred = [];
+    epoch_hd = [];
     with torch.no_grad():
-        for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap, gt_lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].numpy()[0], batch[4].to('cuda');
+        for test_id  in tqdm(test_ids):
+            pred, gt = predict_on_miccai(test_id, model);
+            gt_lbl = torch.sum(gt);
+            dice = DiceLoss()(pred.unsqueeze(0).unsqueeze(0), gt.unsqueeze(0).unsqueeze(0));
 
-            hm1 = model(mri, mri_noisy);
-            hm2 = model(mri_noisy, mri);
-            pred_lbl_1 = torch.sigmoid(hm1)>0.5;
-            pred_lbl_2 = torch.sigmoid(hm2)>0.5;
-            pred = pred_lbl_1 * pred_lbl_2 * brainmask;
-            pred_lbl = torch.sum(pred).item()>0;
-            if gt_lbl == 1:
-                dice = DiceLoss()(pred, heatmap);
-                epoch_dice.append(dice.item());
-            all_gt.append(gt_lbl);
-            all_pred.append(pred_lbl);
-
-            prec,rec,f1,_ = precision_recall_fscore_support(all_gt, all_pred, zero_division=0.0,average='binary');
-
+            if gt_lbl.item() > 0:
+                dice,hd  = calculate_metric_percase(pred.squeeze().numpy(), gt.squeeze().numpy());
+                epoch_dice.append(dice);
+                epoch_hd.append(hd);
 
             # #For regression
             # hm2 = model(mri_noisy, mri);
@@ -376,8 +366,9 @@ def valid_miccai(model, loader):
             # #==============================================
 
             
-            pbar.set_description(('%10s' + '%10.4g'*4)%(epoch, 0 if len(epoch_dice) == 0 else np.mean(epoch_dice), prec, rec, f1));
 
+    print(('%10s' + '%10.4g'*2)%(epoch, np.mean(epoch_dice),
+                                                    np.mean(epoch_hd)));
     return np.mean(epoch_dice);
 
 
@@ -417,8 +408,8 @@ if __name__ == "__main__":
     #update_folds_miccai();
     #cache_test_dataset_miccai(200,0);
 
-    EXP_NAME = 'pretrain-miccai';
-    LOG_MESSAGE = 'pretrain model'
+    EXP_NAME = 'BL+DICE_NEW_AUGMENTATION';
+    LOG_MESSAGE = 'BL+DICE NEW AUGMENTATION'
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
@@ -449,19 +440,20 @@ if __name__ == "__main__":
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_loader = get_loader_pretrain_miccai(0);
+    train_loader, test_ids = get_loader_miccai(0);
     sample_output_interval = 10;
+    print(LOG_MESSAGE);
     for epoch in range(start_epoch, 1000):
         model.train();
-        train_loss = train_miccai_pretrain(model, train_loader, optimizer, scalar); 
+        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
         model.eval();
-        valid_loss = valid_pretrain_miccai(model, test_loader);
+        valid_loss = valid_miccai(model, test_ids);
         summary_writer.add_scalar('train/loss', train_loss, epoch);
         summary_writer.add_scalar('valid/loss', valid_loss, epoch);
-        if epoch %sample_output_interval == 0:
-            print('sampling outputs...');
-            save_examples(model, test_loader);
+        # if epoch %sample_output_interval == 0:
+        #     print('sampling outputs...');
+        #     save_examples_miccai(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
@@ -470,7 +462,7 @@ if __name__ == "__main__":
             'epoch': epoch+1
         }
         torch.save(ckpt,os.path.join('exp', EXP_NAME, 'resume.ckpt'));
-        #lr_scheduler.step();
+        lr_scheduler.step();
 
         if best_loss > valid_loss:
             print(f'new best model found: {valid_loss}')

@@ -18,6 +18,7 @@ import math
 from patchify import patchify
 import seaborn as sns
 from scipy.ndimage import distance_transform_edt, sobel, histogram, prewitt,laplace, gaussian_filter
+from monai.losses.dice import DiceLoss
 
 
 def window_center_adjustment(img):
@@ -771,10 +772,10 @@ def get_loader_miccai(fold):
 
     mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
+    #mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
+    #test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
-    return train_loader, test_loader; 
+    return train_loader, test_ids; 
 
 def standardize(img):
     img = img - np.min(img);
@@ -934,7 +935,148 @@ def gradient(mri):
     ret = np.sqrt(img1**2 + img2**2 + img3**2);
     return ret;
 
-if __name__ == "__main__":
-    d = distance_transform_edt(np.zeros((100,100)));
-    d = d/(np.max(d)+1e-4);
-    print(d);
+def predict_on_miccai(base_path, model):
+
+    normalize_internsity = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
+    def preprocess(mrimage):
+        mask = mrimage > threshold_otsu(mrimage);
+        mask = np.expand_dims(mask, axis=0);
+        mrimage = mrimage / (np.max(mrimage)+1e-4);
+        return mrimage, mask; 
+
+    counter = 0;
+    with torch.no_grad():
+        gt_path = os.path.join(base_path,"ground_truth.nii.gz");
+        brainmask_path = os.path.join(base_path, "brain_mask.nii.gz");
+
+        first_mri_path = os.path.join(base_path, 'flair_time01_on_middle_space.nii.gz');
+        second_mri_path = os.path.join(base_path, 'flair_time02_on_middle_space.nii.gz');
+
+        mri1 = nib.load(first_mri_path)
+        mri2 = nib.load(second_mri_path)
+        gt_image_nib = nib.load(gt_path)
+        brainmask_image_nib = nib.load(brainmask_path)
+
+
+        mri1 = mri1.get_fdata()
+        mri2 = mri2.get_fdata()
+        gt = gt_image_nib.get_fdata();
+        brainmask = brainmask_image_nib.get_fdata();
+
+        gt = gt*brainmask;
+
+
+        mri1 = window_center_adjustment(mri1);
+        mri2 = window_center_adjustment(mri2);
+
+        mri1, fixed_image_data_mask = preprocess(mri1);
+        mri2, rigid_registered_image_data_mask = preprocess(mri2);
+
+
+        w,h,d = mri1.shape;
+        new_w = math.ceil(w / config.hyperparameters['crop_size_w']) * config.hyperparameters['crop_size_w'];
+        new_h = math.ceil(h / config.hyperparameters['crop_size_h']) * config.hyperparameters['crop_size_h'];
+        new_d = math.ceil(d / config.hyperparameters['crop_size_d']) * config.hyperparameters['crop_size_d'];
+
+        mri1_padded  = np.zeros((new_w, new_h, new_d), dtype = mri1.dtype);
+        mri2_padded  = np.zeros((new_w, new_h, new_d), dtype = mri2.dtype);
+        gt_padded  = np.zeros((new_w, new_h, new_d), dtype = gt.dtype);
+        brainmask_padded  = np.zeros((new_w, new_h, new_d), dtype = brainmask.dtype);
+
+        mri1_padded[:w,:h,:d] = mri1;
+        mri2_padded[:w,:h,:d] = mri2;
+        gt_padded[:w,:h,:d] = gt;
+        brainmask_padded[:w,:h,:d] = brainmask;
+
+        step_w, step_h, step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
+        mri1_patches = patchify(mri1_padded, 
+                                            (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                            (step_w, step_h, step_d));
+        mri2_patches = patchify(mri2_padded, 
+                                            (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                            (step_w, step_h, step_d));
+        gt_patches = patchify(gt_padded, 
+                                            (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                            (step_w, step_h, step_d));
+        brainmask_patches = patchify(brainmask_padded, 
+                                            (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                            (step_w, step_h, step_d));
+
+        
+        predicted_aggregated = np.zeros((new_w, new_h, new_d), dtype = np.int32);
+        predicted_aggregated_count = np.zeros((new_w, new_h, new_d), dtype = np.int32);
+        # # data = [];
+        # for i in range(mri2_patches.shape[0]):
+        #     if np.sum(mri1_patches[i]) != 0 and np.sum(mri2_patches[i]) != 0:
+        #         data.append((mri1_patches[i],mri2_patches[i],gt_patches[i], 0 if np.sum(gt_patches[i]) == 0 else 1, brainmask_patches[i]))
+
+        # return data;
+        total_pred = [];
+        for i in range(mri1_patches.shape[0]):
+            for j in range(mri1_patches.shape[1]):
+                for k in range(mri1_patches.shape[2]):
+            #         #trans_ret = crop({'image1': fixed_image_data, 'image2': rigid_registered_image_data, 'mask1': fixed_image_data_mask, 'mask2': rigid_registered_image_data_mask});
+            #         if np.sum(mri1_patches[i,j,k,:,:,:]) != 0 and np.sum(mri2_patches[i,j,k,:,:,:]) != 0:
+                        
+                    
+            # mri1_patches_trans = torch.from_numpy(mri1_patches[i,j,k,:,:,:]);
+            # mri2_patches_trans = torch.from_numpy(mri2_patches[i,j,k,:,:,:]);
+            # gt_lbl = 0 if np.sum(gt_patches[i,j,k,:,:,:]) == 0 else 1;
+            # heatmap = torch.from_numpy(gt_patches[i,j,k,:,:,:]);
+            # brainmask = torch.from_numpy(brainmask_patches[i,j,k,:,:,:]).to('cuda');
+
+            # mri1_patches_trans = normalize_internsity(mri1_patches_trans);
+
+            # #mri2_c = self.augment_noisy_image(mri2_c);
+            # mri2_patches_trans = normalize_internsity(mri2_patches_trans);
+
+                    mri1, mri2, ret_gt, gt_lbl, brainmask = mri1_patches[i,j,k,:,:,:], mri2_patches[i,j,k,:,:,:], gt_patches[i,j,k,:,:,:], 0 if np.sum(gt_patches[i,j,k,:,:,:]) == 0 else 1, brainmask_patches[i,j,k,:,:,:];
+
+                    mri1 = np.expand_dims(mri1, axis=0);
+                    mri2 = np.expand_dims(mri2, axis=0);
+                    ret_gt = np.expand_dims(ret_gt, axis=0);
+
+                    ret_mri1 = normalize_internsity(mri1);
+                    ret_mri2 = normalize_internsity(mri2);
+
+                    ret_gt = torch.from_numpy(ret_gt).to('cuda').unsqueeze(dim=0)
+                    brainmask = torch.from_numpy(brainmask).to('cuda');
+
+                    
+
+                    mri, mri_noisy = ret_mri1.to('cuda').unsqueeze(dim=0), ret_mri2.to('cuda').unsqueeze(dim=0);
+                    #mri_mask, mri_noisy_mask = fixed_image_data_mask_trans.to('cuda'), rigid_registered_image_data_mask_trans.to('cuda');
+                    hm1 = model(mri, mri_noisy);
+                    hm2 = model(mri_noisy, mri);
+                    pred_lbl_1 = torch.sigmoid(hm1)>0.5;
+                    pred_lbl_2 = torch.sigmoid(hm2)>0.5;
+                    pred = pred_lbl_1 * pred_lbl_2 * brainmask;
+
+                    # s = torch.sum(pred);
+
+                    # #gt_lbl = torch.sum(pred).item()>0;
+                    # if gt_lbl == 1:
+                    #     dice = DiceLoss()(pred, ret_gt);
+                    #     total_dice.append(dice.item());
+                    # if gt_lbl ==0 and s > 0:
+                    #     print('a');
+                    
+                    hm1 = hm1.detach().cpu().numpy();
+                    hm2 = hm2.detach().cpu().numpy();
+                    mri = mri.detach().cpu().numpy();
+                    mri_noisy = mri_noisy.detach().cpu().numpy();
+
+                    predicted_aggregated[i*step_w:i*step_w + config.hyperparameters['crop_size_w'], 
+                                j*step_h:(j)*step_h + config.hyperparameters['crop_size_h'], 
+                                k*step_d:(k)*step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
+            
+                    predicted_aggregated_count[i*step_w:i*step_w + config.hyperparameters['crop_size_w'], 
+                                j*step_h:(j)*step_h + config.hyperparameters['crop_size_h'], 
+                                k*step_d:(k)*step_d + config.hyperparameters['crop_size_d']] += np.ones((config.hyperparameters['crop_size_w'], 
+                                                                                                        config.hyperparameters['crop_size_h'], 
+                                                                                                        config.hyperparameters['crop_size_d']), dtype=np.int32);
+               
+   
+    final_pred = torch.from_numpy(predicted_aggregated);
+    gt_padded = torch.from_numpy(gt_padded)
+    return final_pred.unsqueeze(0).unsqueeze(0), gt_padded.unsqueeze(0).unsqueeze(0);
