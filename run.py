@@ -417,8 +417,8 @@ if __name__ == "__main__":
     #update_folds_miccai();
     #cache_test_dataset_miccai(200,0);
 
-    EXP_NAME = 'BL+DICE_NO_AUGMENTATION-PRETRAINED';
-    LOG_MESSAGE = 'BL+DICE NO AUGMENTATION-PRETRAINED'
+    EXP_NAME = 'BL+DICE_NO_AUGMENTATION-PRETRAINED-FIXEDSPLIT';
+    LOG_MESSAGE = 'BL+DICE NO AUGMENTATION-PRETRAINED-FIXEDSPLIT'
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
