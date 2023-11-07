@@ -466,7 +466,7 @@ class MICCAI_Dataset(Dataset):
 
                 gt = gt * brainmask;
                 
-                self.data.append([mri1, mri2, gt, np.expand_dims(gradient.astype("uint8"),axis=0)]);
+                self.data.append([mri1, mri2, gt, np.expand_dims(gradient.astype("uint8"),axis=0), patient_path]);
         
         else:
             for patient_path in patient_ids:
@@ -544,7 +544,7 @@ class MICCAI_Dataset(Dataset):
     def __getitem__(self, index):
         if self.train:
             
-            mri1, mri2, gt, gr = self.data[index];
+            mri1, mri2, gt, gr, pp = self.data[index];
 
             mri1 = np.expand_dims(mri1, axis=0);
             mri2 = np.expand_dims(mri2, axis=0);
@@ -607,13 +607,13 @@ class MICCAI_Dataset(Dataset):
                 g = torch.from_numpy(np.expand_dims(g, axis=0));
 
                 
-                num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
-                for i in range(num_corrupted_patches):
-                    mri2_c, heatmap = add_synthetic_lesion_wm(mri2_c, g)
-                    total_heatmap = torch.clamp(heatmap+total_heatmap, 0, 1);
+                # num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
+                # for _ in range(0):
+                #     mri2_c, heatmap = add_synthetic_lesion_wm(mri2_c, g)
+                #     total_heatmap = torch.clamp(heatmap+total_heatmap, 0, 1);
 
-                total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
-                total_heatmap_thresh = torch.clamp(total_heatmap_thresh + gt_c, 0, 1);
+                #total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
+                total_heatmap_thresh = gt_c
 
                 pos_dt = distance_transform_edt(np.where(total_heatmap_thresh.squeeze().numpy()==1, 0, 1));
                 pos_dt = pos_dt/(np.max(pos_dt)+1e-4);
@@ -631,7 +631,8 @@ class MICCAI_Dataset(Dataset):
                         center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
                     else:
                         center=[mri2_c.shape[1]//2, mri2_c.shape[2]//2, mri2_c.shape[3]//2]
-                    visualize_2d([mri1_c, mri2_c, total_heatmap_thresh, g, gr_c, t2, t1], center);
+                    visualize_2d([mri1_c, mri2_c, total_heatmap_thresh], center, f'{pp[pp.rfind("/")+1:]}_{center}-gt');
+                
                 mri1_c = self.transforms(mri1_c);
 
                 #mri2_c = self.augment_noisy_image(mri2_c);
@@ -787,7 +788,7 @@ def standardize(img):
     img = (img / np.max(img))*255;
     return img;
 
-def visualize_2d(images, slice, size=None,):
+def visualize_2d(images, slice, n,):
     # if size is not None:
     #     res = Resize(size);
     #     mri_ret = res(mri.unsqueeze(dim=0));
@@ -798,7 +799,8 @@ def visualize_2d(images, slice, size=None,):
         ax[i][0].imshow(img[slice[0], :,:], cmap='gray');
         ax[i][1].imshow(img[:,slice[1],:], cmap='gray');
         ax[i][2].imshow(img[:,:,slice[2]], cmap='gray');
-    plt.show();
+    fig.savefig(f'samples\\{n}.png')
+    plt.close("all");
 
 def inpaint_3d(img, mask_g):
     

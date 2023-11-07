@@ -292,6 +292,7 @@ def train_miccai(model, train_loader, optimizer, scalar):
     return np.mean(epoch_loss);
 
 
+
 def train_miccai_pretrain(model, train_loader, optimizer, scalar):
     print(('\n' + '%10s'*3) %('Epoch', 'Loss', 'IoU'));
     pbar = tqdm(enumerate(train_loader), total= len(train_loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
@@ -416,8 +417,8 @@ if __name__ == "__main__":
     #update_folds_miccai();
     #cache_test_dataset_miccai(200,0);
 
-    EXP_NAME = 'BL+DICE_NEW_AUGMENTATION-PRETRAINED';
-    LOG_MESSAGE = 'BL+DICE NEW AUGMENTATION-PRETRAINED'
+    EXP_NAME = 'BL+DICE_NO_AUGMENTATION-PRETRAINED';
+    LOG_MESSAGE = 'BL+DICE NO AUGMENTATION-PRETRAINED'
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
