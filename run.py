@@ -415,10 +415,10 @@ if __name__ == "__main__":
     #update_folds_isbi();
     #cache_mri_gradients();
     #update_folds_miccai();
-    #cache_test_dataset_miccai(200,0);
+    cache_test_dataset_miccai(200,0);
 
-    EXP_NAME = 'BL+DICE_NO_AUGMENTATION-PRETRAINED-FIXEDSPLIT';
-    LOG_MESSAGE = 'BL+DICE NO AUGMENTATION-PRETRAINED-FIXEDSPLIT'
+    EXP_NAME = 'pretrain-miccai';
+    LOG_MESSAGE = 'pretrain model'
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
@@ -428,9 +428,6 @@ if __name__ == "__main__":
         strides=(2, 2, 2),
         num_res_units=2,
         ).to('cuda')
-    if config.PRETRAINED:
-        ckpt = torch.load(config.PRERTRAIN_PATH);
-        model.load_state_dict(ckpt['model']);
     
     if RESUME is True:
         ckpt = torch.load(os.path.join('exp', EXP_NAME, 'resume.ckpt'));
@@ -452,20 +449,19 @@ if __name__ == "__main__":
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_loader = get_loader_miccai(0);
+    train_loader, test_loader = get_loader_pretrain_miccai(0);
     sample_output_interval = 10;
-    print(LOG_MESSAGE);
     for epoch in range(start_epoch, 1000):
         model.train();
-        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
+        train_loss = train_miccai_pretrain(model, train_loader, optimizer, scalar); 
         
         model.eval();
-        valid_loss = valid_miccai(model, test_loader);
+        valid_loss = valid_pretrain_miccai(model, test_loader);
         summary_writer.add_scalar('train/loss', train_loss, epoch);
         summary_writer.add_scalar('valid/loss', valid_loss, epoch);
         if epoch %sample_output_interval == 0:
             print('sampling outputs...');
-            save_examples_miccai(model, test_loader);
+            save_examples(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
@@ -474,7 +470,7 @@ if __name__ == "__main__":
             'epoch': epoch+1
         }
         torch.save(ckpt,os.path.join('exp', EXP_NAME, 'resume.ckpt'));
-        lr_scheduler.step();
+        #lr_scheduler.step();
 
         if best_loss > valid_loss:
             print(f'new best model found: {valid_loss}')
