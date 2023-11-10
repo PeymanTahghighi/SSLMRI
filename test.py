@@ -601,7 +601,7 @@ def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cac
             gt_padded[:w,:h,:d] = gt;
             brainmask_padded[:w,:h,:d] = brainmask;
 
-            step_w, step_h, step_d = config.hyperparameters['crop_size_w']//2, config.hyperparameters['crop_size_h']//2, config.hyperparameters['crop_size_d']//2;
+            step_w, step_h, step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
             mri1_patches = patchify(mri1_padded, 
                                                 (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
                                                 (step_w, step_h, step_d));
@@ -674,8 +674,6 @@ def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cac
                         if gt_lbl == 1:
                             dice = DiceLoss()(pred, ret_gt);
                             total_dice.append(dice.item());
-                        if gt_lbl ==0 and s > 0:
-                            print('a');
                         
                         hm1 = hm1.detach().cpu().numpy();
                         hm2 = hm2.detach().cpu().numpy();
@@ -725,7 +723,7 @@ def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cac
 
         
         #m = np.max(predicted_aggregated_count);                
-        final_pred = np.where(predicted_aggregated>predicted_aggregated_count//2,1,0);
+        final_pred = predicted_aggregated#>predicted_aggregated_count//2,1,0);
         gt_padded = torch.from_numpy(gt_padded)
         final_pred = torch.from_numpy(final_pred)
         gt_lbl = torch.sum(gt_padded);
@@ -761,13 +759,14 @@ if __name__ == "__main__":
     model.eval();
     #predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
     total_dice = [];
-    for i in range(5,len(test_ids)):
+    test_ids = ['013', '026', '027', '091', '094', '095', '099', '100'];
+    test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
+    for i in range(0,len(test_ids)):
         dice, gt_lbl = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
                        f'{test_ids[i]}\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
         #total_data.extend(data);
         if gt_lbl.item() > 0:
-            if dice < 0.98:
-                total_dice.append(dice);
+            total_dice.append(dice);
     print(np.mean(total_dice));
 
     train_loader, test_loader = get_loader_miccai(0);
