@@ -263,13 +263,13 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
-                lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
+                lhf1 = DiceFocalLoss(sigmoid=True)(hm1, curr_heatmap);
+                lhf2 = DiceFocalLoss(sigmoid=True)(hm2, curr_heatmap);
 
-                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
-                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
+                #lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
+                #lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
                 lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
-                loss = (lhf1 + lhf2 + lhh + lhb1 + lhb2)/ config.hyperparameters['virtual_batch_size'];
+                loss = (lhf1 + lhf2 + lhh)/ config.hyperparameters['virtual_batch_size'];
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
@@ -417,8 +417,8 @@ if __name__ == "__main__":
     #update_folds_miccai();
     #cache_test_dataset_miccai(200,0);
 
-    EXP_NAME = 'BL+DICE_AUGMENTATION-Not PRETRAINED-FIXEDSPLIT';
-    LOG_MESSAGE = 'BL+DICE AUGMENTATION-Not PRETRAINED-FIXEDSPLIT'
+    EXP_NAME = 'FOCAL+DICE_AUGMENTATION-Not PRETRAINED-FIXEDSPLIT';
+    LOG_MESSAGE = 'FOCAL+DICE AUGMENTATION-Not PRETRAINED-FIXEDSPLIT'
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
