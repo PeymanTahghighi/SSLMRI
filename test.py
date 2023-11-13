@@ -28,6 +28,7 @@ from patchify import patchify
 import math
 import pickle
 from monai.losses.dice import DiceLoss, DiceFocalLoss
+from utility import calculate_metric_percase
 
 def valid(model, loader, total_data):
     with torch.no_grad():
@@ -722,14 +723,15 @@ def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cac
                 #         plt.close("all");
 
         
-        #m = np.max(predicted_aggregated_count);                
+        #m = np.max(predicted_aggregated_count);
+                        
         final_pred = predicted_aggregated#>predicted_aggregated_count//2,1,0);
         gt_padded = torch.from_numpy(gt_padded)
         final_pred = torch.from_numpy(final_pred)
         gt_lbl = torch.sum(gt_padded);
         dice = DiceLoss()(final_pred.unsqueeze(0).unsqueeze(0), gt_padded.unsqueeze(0).unsqueeze(0));
-        d = np.mean(total_dice);
-        return dice, gt_lbl;
+        d, hd, f1 = calculate_metric_percase(final_pred.numpy(), gt_padded.numpy());
+        return dice, hd, f1;
 
 if __name__ == "__main__":
     #cache_dataset();
@@ -759,15 +761,22 @@ if __name__ == "__main__":
     model.eval();
     #predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
     total_dice = [];
+    total_hd = [];
+    total_f1 = [];
+
     test_ids = ['013', '026', '027', '091', '094', '095', '099', '100'];
     test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
     for i in range(0,len(test_ids)):
-        dice, gt_lbl = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
+        dice, hd, f1 = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
                        f'{test_ids[i]}\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
         #total_data.extend(data);
-        if gt_lbl.item() > 0:
-            total_dice.append(dice);
+        #if gt_lbl.item() > 0:
+        total_dice.append(dice);
+        total_hd.append(hd);
+        total_f1.append(f1);
     print(np.mean(total_dice));
+    print(np.mean(total_hd));
+    print(np.mean(total_f1));
 
     train_loader, test_loader = get_loader_miccai(0);
     

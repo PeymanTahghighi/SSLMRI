@@ -266,8 +266,8 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
                 lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
 
-                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*10;
-                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*10;
+                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
+                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
                 lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
                 loss = (lhf1 + lhf2 + lhh + lhb1 + lhb2)/ config.hyperparameters['virtual_batch_size'];
 
@@ -415,10 +415,10 @@ if __name__ == "__main__":
     #update_folds_isbi();
     #cache_mri_gradients();
     #update_folds_miccai();
-    cache_test_dataset_miccai(200,0);
+    #cache_test_dataset_miccai(200,0);
 
-    EXP_NAME = 'pretrain-miccai';
-    LOG_MESSAGE = 'pretrain model'
+    EXP_NAME = 'BL+DICE_AUGMENTATION-Not PRETRAINED-FIXEDSPLIT';
+    LOG_MESSAGE = 'BL+DICE AUGMENTATION-Not PRETRAINED-FIXEDSPLIT'
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
@@ -428,6 +428,9 @@ if __name__ == "__main__":
         strides=(2, 2, 2),
         num_res_units=2,
         ).to('cuda')
+    if config.PRETRAINED:
+        ckpt = torch.load(config.PRERTRAIN_PATH);
+        model.load_state_dict(ckpt['model']);
     
     if RESUME is True:
         ckpt = torch.load(os.path.join('exp', EXP_NAME, 'resume.ckpt'));
@@ -437,7 +440,7 @@ if __name__ == "__main__":
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
     optimizer = optim.AdamW(model.parameters(), lr = config.hyperparameters['learning_rate']);
 
-    lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-6);
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-5);
     summary_writer = SummaryWriter(os.path.join('exp', EXP_NAME));
     best_loss = 100;
     start_epoch = 0;
@@ -449,19 +452,20 @@ if __name__ == "__main__":
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_loader = get_loader_pretrain_miccai(0);
+    train_loader, test_loader = get_loader_miccai(0);
     sample_output_interval = 10;
+    print(LOG_MESSAGE);
     for epoch in range(start_epoch, 1000):
         model.train();
-        train_loss = train_miccai_pretrain(model, train_loader, optimizer, scalar); 
+        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
         model.eval();
-        valid_loss = valid_pretrain_miccai(model, test_loader);
+        valid_loss = valid_miccai(model, test_loader);
         summary_writer.add_scalar('train/loss', train_loss, epoch);
         summary_writer.add_scalar('valid/loss', valid_loss, epoch);
         if epoch %sample_output_interval == 0:
             print('sampling outputs...');
-            save_examples(model, test_loader);
+            save_examples_miccai(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
@@ -470,7 +474,7 @@ if __name__ == "__main__":
             'epoch': epoch+1
         }
         torch.save(ckpt,os.path.join('exp', EXP_NAME, 'resume.ckpt'));
-        #lr_scheduler.step();
+        lr_scheduler.step();
 
         if best_loss > valid_loss:
             print(f'new best model found: {valid_loss}')

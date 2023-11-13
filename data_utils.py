@@ -209,81 +209,70 @@ class MRI_Dataset(Dataset):
 
 def cropper(mri1, mri2, gt, gr, roi_size, num_samples):
     ret = [];
-
     for i in range(num_samples):
-        if i%2==0:
-            pos_cords = np.where(gt > 0);
-            r = np.random.randint(0,len(pos_cords[0]));
-            center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
-            d_x_l = min(roi_size[0]//2,center[0]);
-            d_x_r = min(roi_size[0]//2 ,mri1.shape[1]-center[0]);
-            if d_x_l != roi_size[0]//2:
-                diff = abs(roi_size[0]//2 - center[0]);
-                d_x_r += diff;
-            if d_x_r != roi_size[0]//2 and d_x_l == roi_size[0]//2:
-                diff = abs(roi_size[0]//2 - (mri1.shape[1]-center[0]));
-                d_x_l += diff;
-            
-            d_y_l = min(roi_size[1]//2,center[1]);
-            d_y_r = min(roi_size[1]//2 ,mri1.shape[2]-center[1]);
-            if d_y_l != roi_size[1]//2:
-                diff = abs(roi_size[1]//2 - center[1]);
-                d_y_r += diff;
-            if d_y_r != roi_size[1]//2 and d_y_l == roi_size[1]//2:
-                diff = abs(roi_size[1]//2 - mri1.shape[2]-center[1]);
-                d_y_l += diff;
-            
-            d_z_l = min(roi_size[2]//2,center[2]);
-            d_z_r = min(roi_size[2]//2 ,mri1.shape[3]-center[2]);
-            if d_z_l != roi_size[2]//2:
-                diff = abs(roi_size[2]//2 - center[2]);
-                d_z_r += diff;
-            if d_z_r != roi_size[2]//2 and d_z_l == roi_size[2]//2:
-                diff = abs(roi_size[2]//2 - mri1.shape[3]-center[2]);
-                d_z_l += diff;
-
-            sign_x = np.random.randint(1,3);
-            if sign_x%2!=0:
-                offset_x = np.random.randint(0, max(min(abs(center[0]-int(d_x_l)), int(d_x_l//2)),1))*-1;
-            else:
-                offset_x = np.random.randint(0, max(min(abs(center[0]+int(d_x_r)-mri1.shape[1]), int(d_x_r//2)), 1));
-            start_x = center[0]-int(d_x_l)+offset_x;
-            end_x = center[0]+int(d_x_r)+offset_x;
-
-            sign_y = np.random.randint(1,3);
-            if sign_y%2!=0:
-                offset_y = np.random.randint(0, max(min(abs(center[1]-int(d_y_l)), int(d_y_l//2)),1))*-1;
-            else:
-                offset_y = np.random.randint(0, max(min(abs(center[1]+int(d_y_r)-mri1.shape[2]), int(d_y_r//2)), 1));
-            start_y = center[1]-int(d_y_l) + offset_y;
-            end_y = center[1]+int(d_y_r) + offset_y;
-
-            sign_z = np.random.randint(1,3);
-            if sign_z%2!=0:
-                offset_z = np.random.randint(0, max(min(abs(center[2]-int(d_z_l)), int(d_z_l)),1))*-1;
-            else:
-                offset_z = np.random.randint(0, max(min(abs(center[2]+int(d_z_r)-mri1.shape[3]), int(d_z_r//2)), 1));
-            
-            start_z = center[2]-int(d_z_l)+offset_z;
-            end_z = center[2]+int(d_z_r)+offset_z;
-
-            d = dict();
-            d['image1'] = torch.from_numpy(mri1[:, start_x:end_x, start_y:end_y, start_z:end_z]);
-            d['image2'] = torch.from_numpy(mri2[:, start_x:end_x, start_y:end_y, start_z:end_z]);
-            d['mask'] = torch.from_numpy(gt[:, start_x:end_x, start_y:end_y, start_z:end_z]);
-            d['gradient'] = torch.from_numpy(gr[:,start_x:end_x, start_y:end_y, start_z:end_z]);
-
-            
-        else:
-            d = RandCropByPosNegLabeld(
-            keys=['image1', 'image2', 'mask', 'gradient'], 
-            label_key='image2', 
-            spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
-            pos=1, 
-            neg=0,
-            num_samples=1)({'image1': mri1,'image2': mri2, 'mask': gt, 'gradient': gr})[0];
+        pos_cords = np.where(gt > 0);
+        r = np.random.randint(0,len(pos_cords[0]));
+        center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+        d_x_l = min(roi_size[0]//2,center[0]);
+        d_x_r = min(roi_size[0]//2 ,mri1.shape[1]-center[0]);
+        if d_x_l != roi_size[0]//2:
+            diff = abs(roi_size[0]//2 - center[0]);
+            d_x_r += diff;
+        if d_x_r != roi_size[0]//2 and d_x_l == roi_size[0]//2:
+            diff = abs(roi_size[0]//2 - (mri1.shape[1]-center[0]));
+            d_x_l += diff;
         
+        d_y_l = min(roi_size[1]//2,center[1]);
+        d_y_r = min(roi_size[1]//2 ,mri1.shape[2]-center[1]);
+        if d_y_l != roi_size[1]//2:
+            diff = abs(roi_size[1]//2 - center[1]);
+            d_y_r += diff;
+        if d_y_r != roi_size[1]//2 and d_y_l == roi_size[1]//2:
+            diff = abs(roi_size[1]//2 - mri1.shape[2]-center[1]);
+            d_y_l += diff;
+        
+        d_z_l = min(roi_size[2]//2,center[2]);
+        d_z_r = min(roi_size[2]//2 ,mri1.shape[3]-center[2]);
+        if d_z_l != roi_size[2]//2:
+            diff = abs(roi_size[2]//2 - center[2]);
+            d_z_r += diff;
+        if d_z_r != roi_size[2]//2 and d_z_l == roi_size[2]//2:
+            diff = abs(roi_size[2]//2 - mri1.shape[3]-center[2]);
+            d_z_l += diff;
+
+        sign_x = np.random.randint(1,3);
+        if sign_x%2!=0:
+            offset_x = np.random.randint(0, max(min(abs(center[0]-int(d_x_l)), int(d_x_l//2)),1))*-1;
+        else:
+            offset_x = np.random.randint(0, max(min(abs(center[0]+int(d_x_r)-mri1.shape[1]), int(d_x_r//2)), 1));
+        start_x = center[0]-int(d_x_l)+offset_x;
+        end_x = center[0]+int(d_x_r)+offset_x;
+
+        sign_y = np.random.randint(1,3);
+        if sign_y%2!=0:
+            offset_y = np.random.randint(0, max(min(abs(center[1]-int(d_y_l)), int(d_y_l//2)),1))*-1;
+        else:
+            offset_y = np.random.randint(0, max(min(abs(center[1]+int(d_y_r)-mri1.shape[2]), int(d_y_r//2)), 1));
+        start_y = center[1]-int(d_y_l) + offset_y;
+        end_y = center[1]+int(d_y_r) + offset_y;
+
+        sign_z = np.random.randint(1,3);
+        if sign_z%2!=0:
+            offset_z = np.random.randint(0, max(min(abs(center[2]-int(d_z_l)), int(d_z_l)),1))*-1;
+        else:
+            offset_z = np.random.randint(0, max(min(abs(center[2]+int(d_z_r)-mri1.shape[3]), int(d_z_r//2)), 1));
+        
+        start_z = center[2]-int(d_z_l)+offset_z;
+        end_z = center[2]+int(d_z_r)+offset_z;
+
+        d = dict();
+        d['image1'] = torch.from_numpy(mri1[:, start_x:end_x, start_y:end_y, start_z:end_z]);
+        d['image2'] = torch.from_numpy(mri2[:, start_x:end_x, start_y:end_y, start_z:end_z]);
+        d['mask'] = torch.from_numpy(gt[:, start_x:end_x, start_y:end_y, start_z:end_z]);
+        d['gradient'] = torch.from_numpy(gr[:,start_x:end_x, start_y:end_y, start_z:end_z]);
+
         ret.append(d);
+
     return ret;
 
 class MICCAI_PRETRAIN_Dataset(Dataset):
