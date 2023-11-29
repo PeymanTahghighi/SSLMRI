@@ -731,9 +731,10 @@ def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cac
         gt_lbl = torch.sum(gt_padded);
         dice = DiceLoss()(final_pred.unsqueeze(0).unsqueeze(0), gt_padded.unsqueeze(0).unsqueeze(0));
         d, hd, f1 = calculate_metric_percase(final_pred.numpy(), gt_padded.numpy());
-        return dice, hd, f1;
+        return dice, hd, f1, gt_lbl;
 
 if __name__ == "__main__":
+
     #cache_dataset();
     # reader = sitk.ImageSeriesReader()
 
@@ -752,7 +753,7 @@ if __name__ == "__main__":
             num_res_units=2,
             );
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load('best_model-miccai.ckpt');
+    ckpt = torch.load('exp\\BL+DICE_AUGMENTATION-NOT PRETRAINED-FIXEDSPLIT-BL=10-F4\\best_model.ckpt');
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 
@@ -764,19 +765,19 @@ if __name__ == "__main__":
     total_hd = [];
     total_f1 = [];
 
-    test_ids = ['013', '026', '027', '091', '094', '095', '099', '100'];
+    test_ids = ['074', '077', '083', '084', '088', '089', '090', '096'];
     test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
-    for i in range(0,len(test_ids)):
-        dice, hd, f1 = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
+    for i in tqdm(range(0,len(test_ids))):
+        dice, hd, f1, gt_lbl = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
                        f'{test_ids[i]}\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
         #total_data.extend(data);
-        #if gt_lbl.item() > 0:
-        total_dice.append(dice);
-        total_hd.append(hd);
-        total_f1.append(f1);
-    print(np.mean(total_dice));
-    print(np.mean(total_hd));
-    print(np.mean(total_f1));
+        if gt_lbl.item() > 0:
+            total_dice.append(dice);
+            total_hd.append(hd);
+            total_f1.append(f1);
+    print(f"dice:{np.mean(total_dice)}");
+    print(f"hd:{np.mean(total_hd)}");
+    print(f"f1:{np.mean(total_f1)}");
 
     train_loader, test_loader = get_loader_miccai(0);
     

@@ -57,11 +57,12 @@ def cache_test_dataset_miccai(num_data, fold):
     if os.path.exists(f'cache_miccai/{fold}') is False:
         os.makedirs(f'cache_miccai/{fold}');
     
-
-    train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{fold}.fold'), 'rb'));
-    train_ids = ['015','016','018','019', '020', '021', '024', '029', '030', '032', '035', '037', '039', '043', '047', '048', '049', '051', '052', '057', '061', '068', '069', '070', '074', '077', '083', '084', '088', '089', '090', '096'];
-    test_ids = ['013', '026', '027', '091', '094', '095', '099', '100'];
-    train_ids =  [os.path.join('miccai-processed', t) for t in train_ids];
+    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
+        train_ids = f.readline().rstrip();
+        train_ids = train_ids.split(',');
+        test_ids = f.readline().rstrip();
+        test_ids = test_ids.split(',');
+    
     test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
     mri_paths = [];
     for t in test_ids:
@@ -777,20 +778,22 @@ def get_loader_pretrain_miccai(fold):
 
 def get_loader_miccai(fold):
     
-    train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{fold}.fold'), 'rb'));
-    train_ids = ['015','016','018','019', '020', '021', '024', '029', '030', '032', '035', '037', '039', '043', '047', '048', '049', '051', '052', '057', '061', '068', '069', '070', '074', '077', '083', '084', '088', '089', '090', '096'];
-    test_ids = ['013', '026', '027', '091', '094', '095', '099', '100'];
+    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
+        train_ids = f.readline().rstrip();
+        train_ids = train_ids.split(',');
+        test_ids = f.readline().rstrip();
+        test_ids = test_ids.split(',');
     train_ids =  [os.path.join('miccai-processed', t) for t in train_ids];
     test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
 
 
 
-    mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
+    mri_dataset_train = MICCAI_Dataset(train_ids[:1], train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
+    #mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
+    #test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
-    return train_loader, test_loader; 
+    return train_loader, test_ids; 
 
 def standardize(img):
     img = img - np.min(img);

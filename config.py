@@ -10,8 +10,9 @@ hyperparameters = {
     'deterministic':False,
     'virtual_batch_size':1,
     'num_workers': 8,
-    'bl_multiplier': 20
+    'bl_multiplier': 5
 }
 DEBUG_TRAIN_DATA = False;
 PRETRAINED = False
 PRERTRAIN_PATH = 'exp/pretrain-miccai/best_model.ckpt';
+FOLD = 4;

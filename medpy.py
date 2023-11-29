@@ -111,7 +111,7 @@ def jc(result, reference):
     intersection = numpy.count_nonzero(result & reference)
     union = numpy.count_nonzero(result | reference)
     
-    jc = float(intersection) / float(union)
+    jc = float(intersection) / (float(union) + 1e-6)
     
     return jc
 
