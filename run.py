@@ -345,14 +345,14 @@ def valid_miccai(model, loader, dataset):
     pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     with torch.no_grad():
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].to('cuda');
+            mri, mri_noisy, heatmap, brainmask, patient_id, loc = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].to('cuda'), batch[4], batch[5];
 
             hm1 = model(mri, mri_noisy);
             hm2 = model(mri_noisy, mri);
             pred_lbl_1 = torch.sigmoid(hm1)>0.5;
             pred_lbl_2 = torch.sigmoid(hm2)>0.5;
             pred = pred_lbl_1 * pred_lbl_2 * brainmask;
-            dataset.update_prediction(heatmap);
+            dataset.update_prediction(pred, patient_id[0], loc);
     
     epoch_dice = dataset.calculate_metrics();
     return epoch_dice;

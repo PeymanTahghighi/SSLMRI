@@ -667,8 +667,6 @@ class MICCAI_Dataset(Dataset):
        
         else:
             mri1, mri2, ret_gt, patient_id, brainmask, loc = self.data[index];
-            self.patient_id = patient_id;
-            self.loc = loc;
 
             mri1 = np.expand_dims(mri1, axis=0);
             mri2 = np.expand_dims(mri2, axis=0);
@@ -686,11 +684,11 @@ class MICCAI_Dataset(Dataset):
                     center=[mri1.shape[1]//2, mri1.shape[2]//2, mri1.shape[3]//2]
                 visualize_2d([ret_mri1, ret_mri2, ret_gt, brainmask], center);
 
-            return ret_mri1, ret_mri2, ret_gt, brainmask;
-    def update_prediction(self, pred):
-        self.pred_data[self.patient_id][self.loc[0]*self.step_w:self.loc[0]*self.step_w + config.hyperparameters['crop_size_w'], 
-                                self.loc[1]*self.step_h:(self.loc[1])*self.step_h + config.hyperparameters['crop_size_h'], 
-                                self.loc[2]*self.step_d:(self.loc[2])*self.step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
+            return ret_mri1, ret_mri2, ret_gt, brainmask, patient_id, loc;
+    def update_prediction(self, pred, patient_id, loc):
+        self.pred_data[patient_id][loc[0]*self.step_w:loc[0]*self.step_w + config.hyperparameters['crop_size_w'], 
+                                loc[1]*self.step_h:(loc[1])*self.step_h + config.hyperparameters['crop_size_h'], 
+                                loc[2]*self.step_d:(loc[2])*self.step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
 
     def calculate_metrics(self):
         ret = [];
