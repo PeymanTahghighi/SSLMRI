@@ -19,6 +19,7 @@ from patchify import patchify
 import seaborn as sns
 from scipy.ndimage import distance_transform_edt, sobel, histogram, prewitt,laplace, gaussian_filter
 from monai.losses.dice import DiceLoss
+from utility import calculate_metric_percase
 
 
 def window_center_adjustment(img):
@@ -450,6 +451,8 @@ class MICCAI_Dataset(Dataset):
         self.train = train;
 
         self.data = [];
+        self.pred_data = dict();
+        self.gt_data = dict();
         
         if train:
             for patient_path in patient_ids:
@@ -516,28 +519,33 @@ class MICCAI_Dataset(Dataset):
                 gt_padded[:w,:h,:d] = gt;
                 brainmask_padded[:w,:h,:d] = brainmask;
 
-                step_w, step_h, step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
+                self.step_w, self.step_h, self.step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
                 mri1_patches = patchify(mri1_padded, 
                                                     (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
-                                                    (step_w, step_h, step_d));
+                                                    (self.step_w, self.step_h, self.step_d));
                 mri2_patches = patchify(mri2_padded, 
                                                     (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
-                                                    (step_w, step_h, step_d));
+                                                    (self.step_w, self.step_h, self.step_d));
                 gt_patches = patchify(gt_padded, 
                                                     (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
-                                                    (step_w, step_h, step_d));
+                                                    (self.step_w, self.step_h, self.step_d));
                 brainmask_patches = patchify(brainmask_padded, 
                                                     (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
-                                                    (step_w, step_h, step_d));
-                mri1_patches = mri1_patches.reshape(mri1_patches.shape[0]*mri1_patches.shape[1]*mri1_patches.shape[2], mri1_patches.shape[3], mri1_patches.shape[4],mri1_patches.shape[5]);
-                mri2_patches = mri2_patches.reshape(mri2_patches.shape[0]*mri2_patches.shape[1]*mri2_patches.shape[2], mri2_patches.shape[3], mri2_patches.shape[4],mri2_patches.shape[5]);
-                gt_patches = gt_patches.reshape(gt_patches.shape[0]*gt_patches.shape[1]*gt_patches.shape[2], gt_patches.shape[3], gt_patches.shape[4],gt_patches.shape[5]);
-                brainmask_patches = brainmask_patches.reshape(brainmask_patches.shape[0]*brainmask_patches.shape[1]*brainmask_patches.shape[2], brainmask_patches.shape[3], brainmask_patches.shape[4],brainmask_patches.shape[5]);
+                                                    (self.step_w, self.step_h, self.step_d));
+                # mri1_patches = mri1_patches.reshape(mri1_patches.shape[0]*mri1_patches.shape[1]*mri1_patches.shape[2], mri1_patches.shape[3], mri1_patches.shape[4],mri1_patches.shape[5]);
+                # mri2_patches = mri2_patches.reshape(mri2_patches.shape[0]*mri2_patches.shape[1]*mri2_patches.shape[2], mri2_patches.shape[3], mri2_patches.shape[4],mri2_patches.shape[5]);
+                # gt_patches = gt_patches.reshape(gt_patches.shape[0]*gt_patches.shape[1]*gt_patches.shape[2], gt_patches.shape[3], gt_patches.shape[4],gt_patches.shape[5]);
+                # brainmask_patches = brainmask_patches.reshape(brainmask_patches.shape[0]*brainmask_patches.shape[1]*brainmask_patches.shape[2], brainmask_patches.shape[3], brainmask_patches.shape[4],brainmask_patches.shape[5]);
 
                 curr_data = [];
                 for i in range(mri1_patches.shape[0]):
-                    if np.sum(mri1_patches[i]) != 0 and np.sum(mri2_patches[i]) != 0:
-                        curr_data.append((mri1_patches[i],mri2_patches[i],gt_patches[i], 0 if np.sum(gt_patches[i]) == 0 else 1, brainmask_patches[i]))
+                    for j in range(mri1_patches.shape[1]):
+                        for k in range(mri1_patches.shape[2]):
+                            curr_data.append((mri1_patches[i,j,k,...],mri2_patches[i,j,k,...],gt_patches[i,j,k,...], patient_id[patient_id.rfind('\\')+1:], brainmask_patches[i,j,k,...], [i,j,k]))
+
+                predicted_aggregated = np.zeros((new_w, new_h, new_d), dtype = np.int32);
+                self.pred_data[patient_id[patient_id.rfind('\\')+1:]] = predicted_aggregated;
+                self.gt_data[patient_id[patient_id.rfind('\\')+1:]] = gt_padded;
 
                 self.data.extend(curr_data);
 
@@ -658,7 +666,9 @@ class MICCAI_Dataset(Dataset):
             return ret_mri1, ret_mri2, ret_gt, ret_dt;
        
         else:
-            mri1, mri2, ret_gt, lbl, brainmask = self.data[index];
+            mri1, mri2, ret_gt, patient_id, brainmask, loc = self.data[index];
+            self.patient_id = patient_id;
+            self.loc = loc;
 
             mri1 = np.expand_dims(mri1, axis=0);
             mri2 = np.expand_dims(mri2, axis=0);
@@ -676,7 +686,19 @@ class MICCAI_Dataset(Dataset):
                     center=[mri1.shape[1]//2, mri1.shape[2]//2, mri1.shape[3]//2]
                 visualize_2d([ret_mri1, ret_mri2, ret_gt, brainmask], center);
 
-            return ret_mri1, ret_mri2, ret_gt, lbl, brainmask;
+            return ret_mri1, ret_mri2, ret_gt, brainmask;
+    def update_prediction(self, pred):
+        self.pred_data[self.patient_id][self.loc[0]*self.step_w:self.loc[0]*self.step_w + config.hyperparameters['crop_size_w'], 
+                                self.loc[1]*self.step_h:(self.loc[1])*self.step_h + config.hyperparameters['crop_size_h'], 
+                                self.loc[2]*self.step_d:(self.loc[2])*self.step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
+
+    def calculate_metrics(self):
+        ret = [];
+        for k in self.pred_data.keys():
+            dice = calculate_metric_percase(self.pred_data[k].squeeze(), self.gt_data[k].squeeze(), simple=True);
+            ret.append(dice);
+        return np.mean(ret);
+
 
 def update_folds(num_test_data = 200):
     if os.path.exists('cache') is False:
@@ -788,12 +810,12 @@ def get_loader_miccai(fold):
 
 
 
-    mri_dataset_train = MICCAI_Dataset(train_ids[:1], train=True);
+    mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    #mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
-    #test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
+    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
-    return train_loader, test_ids; 
+    return train_loader, test_loader, mri_dataset_test; 
 
 def standardize(img):
     img = img - np.min(img);
