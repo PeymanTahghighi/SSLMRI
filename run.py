@@ -395,7 +395,7 @@ if __name__ == "__main__":
     #cache_test_dataset_miccai(200,1);
 
     EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
-    RESUME = False;
+    RESUME = True;
     model = UNet3D(
         spatial_dims=3,
         in_channels=1,
@@ -409,7 +409,7 @@ if __name__ == "__main__":
         model.load_state_dict(ckpt['model']);
     
     if RESUME is True:
-        ckpt = torch.load(os.path.join('exp', EXP_NAME, 'resume.ckpt'));
+        ckpt = torch.load('resume.ckpt');
         model.load_state_dict(ckpt['model']);
 
     model.to('cuda');

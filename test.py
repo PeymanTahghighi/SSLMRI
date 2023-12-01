@@ -768,7 +768,7 @@ if __name__ == "__main__":
             num_res_units=2,
             );
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load('best_model_miccai.ckpt');
+    ckpt = torch.load('best_model.ckpt');
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 

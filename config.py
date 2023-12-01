@@ -9,7 +9,7 @@ hyperparameters = {
     'sample_per_mri':8,
     'deterministic':False,
     'virtual_batch_size':1,
-    'num_workers': 0,
+    'num_workers': 4,
     'bl_multiplier': 5
 }
 DEBUG_TRAIN_DATA = False;

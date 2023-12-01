@@ -686,9 +686,9 @@ class MICCAI_Dataset(Dataset):
 
             return ret_mri1, ret_mri2, ret_gt, brainmask, patient_id, loc;
     def update_prediction(self, pred, patient_id, loc):
-        self.pred_data[patient_id][loc[0]*self.step_w:loc[0]*self.step_w + config.hyperparameters['crop_size_w'], 
-                                loc[1]*self.step_h:(loc[1])*self.step_h + config.hyperparameters['crop_size_h'], 
-                                loc[2]*self.step_d:(loc[2])*self.step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
+        self.pred_data[patient_id][(loc[0].item())*self.step_w:(loc[0].item())*self.step_w + config.hyperparameters['crop_size_w'], 
+                                (loc[1].item())*self.step_h:((loc[1].item()))*self.step_h + config.hyperparameters['crop_size_h'], 
+                                (loc[2].item())*self.step_d:((loc[2].item()))*self.step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
 
     def calculate_metrics(self):
         ret = [];
@@ -809,7 +809,7 @@ def get_loader_miccai(fold):
 
 
 
-    mri_dataset_train = MICCAI_Dataset(train_ids[:1], train=True);
+    mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
     mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
