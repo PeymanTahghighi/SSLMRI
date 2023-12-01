@@ -694,7 +694,8 @@ class MICCAI_Dataset(Dataset):
         ret = [];
         for k in self.pred_data.keys():
             dice = calculate_metric_percase(self.pred_data[k].squeeze(), self.gt_data[k].squeeze(), simple=True);
-            ret.append(dice);
+            if np.sum(self.gt_data[k].squeeze()) > 0:
+                ret.append(dice);
         return np.mean(ret);
 
 
@@ -808,7 +809,7 @@ def get_loader_miccai(fold):
 
 
 
-    mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
+    mri_dataset_train = MICCAI_Dataset(train_ids[:1], train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
     mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);

@@ -30,73 +30,88 @@ import pickle
 from monai.losses.dice import DiceLoss, DiceFocalLoss
 from utility import calculate_metric_percase
 
-def valid(model, loader, total_data):
+def valid(model, loader, dataset):
+    print(('\n' + '%10s'*2) %('Epoch', 'Dice'));
+    pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     with torch.no_grad():
-        pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
-        counter = 0;
-        epoch_dice = [];
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap, gt_lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3], batch[4].to('cuda');
-           # mri_c, mri_noisy_c, ht_c,_,_ = total_data[counter];
+            mri, mri_noisy, heatmap, brainmask, patient_id, loc = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].to('cuda'), batch[4], batch[5];
 
-            
             hm1 = model(mri, mri_noisy);
             hm2 = model(mri_noisy, mri);
             pred_lbl_1 = torch.sigmoid(hm1)>0.5;
             pred_lbl_2 = torch.sigmoid(hm2)>0.5;
-            pred = (pred_lbl_1 * pred_lbl_2*brainmask);
+            pred = pred_lbl_1 * pred_lbl_2 * brainmask;
+            dataset.update_prediction(pred, patient_id[0], loc);
+    
+    epoch_dice = dataset.calculate_metrics();
+    return epoch_dice;
+    # with torch.no_grad():
+    #     pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
+    #     counter = 0;
+    #     epoch_dice = [];
+    #     for idx, (batch) in pbar:
+    #         mri, mri_noisy, heatmap, gt_lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3], batch[4].to('cuda');
+    #        # mri_c, mri_noisy_c, ht_c,_,_ = total_data[counter];
+
+            
+    #         hm1 = model(mri, mri_noisy);
+    #         hm2 = model(mri_noisy, mri);
+    #         pred_lbl_1 = torch.sigmoid(hm1)>0.5;
+    #         pred_lbl_2 = torch.sigmoid(hm2)>0.5;
+    #         pred = (pred_lbl_1 * pred_lbl_2*brainmask);
 
             
             
             
-            hm1 = hm1.detach().cpu().numpy();
-            hm2 = hm2.detach().cpu().numpy();
-            mri = mri.detach().cpu().numpy();
-            mri_noisy = mri_noisy.detach().cpu().numpy();
+    #         hm1 = hm1.detach().cpu().numpy();
+    #         hm2 = hm2.detach().cpu().numpy();
+    #         mri = mri.detach().cpu().numpy();
+    #         mri_noisy = mri_noisy.detach().cpu().numpy();
 
-            dice_c = total_data[counter];
-            diff1 = torch.sum(torch.abs(dice_c-pred));
-            if diff1!=0:
-                print(f"diff1: {diff1}");
-            counter +=1;
-            if gt_lbl == 1:
-                dice = DiceLoss()(pred, heatmap);
+    #         dice_c = total_data[counter];
+    #         diff1 = torch.sum(torch.abs(dice_c-pred));
+    #         if diff1!=0:
+    #             print(f"diff1: {diff1}");
+    #         counter +=1;
+    #         if gt_lbl == 1:
+    #             dice = DiceLoss()(pred, heatmap);
                 
-                epoch_dice.append(dice.item());
+    #             epoch_dice.append(dice.item());
 
-                if dice >0.6:
-                    heatmap = heatmap.detach().cpu().numpy();
-                    pred = pred.detach().cpu().numpy();
-                    for j in range(2):
-                        #heatmap = (1-heatmap) > 0;
-                        pos_cords = np.where(heatmap[0] >0);
-                        if len(pos_cords[0]) != 0:
-                            r = np.random.randint(0,len(pos_cords[0]));
-                            center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
-                        else:
-                            center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
-                        fig, ax = plt.subplots(2,6);
-                        ax[0][0].imshow(pred[0,0,center[0], :, :], cmap='hot');
-                        ax[0][1].imshow(pred[0,0,:,center[1], :], cmap='hot');
-                        ax[0][2].imshow(pred[0,0, :, :,center[2]], cmap='hot');
+    #             if dice >0.6:
+    #                 heatmap = heatmap.detach().cpu().numpy();
+    #                 pred = pred.detach().cpu().numpy();
+    #                 for j in range(2):
+    #                     #heatmap = (1-heatmap) > 0;
+    #                     pos_cords = np.where(heatmap[0] >0);
+    #                     if len(pos_cords[0]) != 0:
+    #                         r = np.random.randint(0,len(pos_cords[0]));
+    #                         center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+    #                     else:
+    #                         center = [hm1.shape[2]//2, hm1.shape[3]//2, hm1.shape[4]//2]
+    #                     fig, ax = plt.subplots(2,6);
+    #                     ax[0][0].imshow(pred[0,0,center[0], :, :], cmap='hot');
+    #                     ax[0][1].imshow(pred[0,0,:,center[1], :], cmap='hot');
+    #                     ax[0][2].imshow(pred[0,0, :, :,center[2]], cmap='hot');
 
-                        ax[0][3].imshow(heatmap[0,0,center[0], :, :]);
-                        ax[0][4].imshow(heatmap[0,0,:,center[1], :]);
-                        ax[0][5].imshow(heatmap[0,0, :, :,center[2]]);
+    #                     ax[0][3].imshow(heatmap[0,0,center[0], :, :]);
+    #                     ax[0][4].imshow(heatmap[0,0,:,center[1], :]);
+    #                     ax[0][5].imshow(heatmap[0,0, :, :,center[2]]);
 
-                        ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
-                        ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
-                        ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
+    #                     ax[1][0].imshow(mri[0,0,center[0], :, :], cmap='gray');
+    #                     ax[1][1].imshow(mri[0,0,:,center[1], :], cmap='gray');
+    #                     ax[1][2].imshow(mri[0,0, :, :,center[2]], cmap='gray');
 
-                        ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
-                        ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
-                        ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
+    #                     ax[1][3].imshow(mri_noisy[0,0,center[0], :, :], cmap='gray');
+    #                     ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
+    #                     ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
 
-                        fig.savefig(os.path.join('samples',f'sample_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
-                        plt.close("all");
+    #                     fig.savefig(os.path.join('samples',f'sample_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
+    #                     plt.close("all");
             
 
-        print(np.mean(epoch_dice));
+    #     print(np.mean(epoch_dice));
 
 def save_examples(model, batch, name):
     if os.path.exists('samples') is False:
@@ -753,7 +768,7 @@ if __name__ == "__main__":
             num_res_units=2,
             );
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load('exp\\BL+DICE_AUGMENTATION-NOT PRETRAINED-FIXEDSPLIT-BL=10-F4\\best_model.ckpt');
+    ckpt = torch.load('best_model_miccai.ckpt');
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 
@@ -765,21 +780,26 @@ if __name__ == "__main__":
     total_hd = [];
     total_f1 = [];
 
-    test_ids = ['074', '077', '083', '084', '088', '089', '090', '096'];
-    test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
-    for i in tqdm(range(0,len(test_ids))):
-        dice, hd, f1, gt_lbl = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
-                       f'{test_ids[i]}\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
-        #total_data.extend(data);
-        if gt_lbl.item() > 0:
-            total_dice.append(dice);
-            total_hd.append(hd);
-            total_f1.append(f1);
-    print(f"dice:{np.mean(total_dice)}");
-    print(f"hd:{np.mean(total_hd)}");
-    print(f"f1:{np.mean(total_f1)}");
+    # with open(os.path.join('cache_miccai', f'fold{4}.txt'), 'r') as f:
+    #     train_ids = f.readline().rstrip();
+    #     train_ids = train_ids.split(',');
+    #     test_ids = f.readline().rstrip();
+    #     test_ids = test_ids.split(',');
+    # test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
 
-    train_loader, test_loader = get_loader_miccai(0);
+    # for i in tqdm(range(0,len(test_ids))):
+    #     dice, hd, f1, gt_lbl = predict_on_lesjak(test_ids[i], f'{test_ids[i]}\\flair_time01_on_middle_space.nii.gz',
+    #                    f'{test_ids[i]}\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
+    #     #total_data.extend(data);
+    #     if gt_lbl.item() > 0:
+    #         total_dice.append(dice);
+    #         total_hd.append(hd);
+    #         total_f1.append(f1);
+    # print(f"dice:{np.mean(total_dice)}");
+    # print(f"hd:{np.mean(total_hd)}");
+    # print(f"f1:{np.mean(total_f1)}");
+
+    train_loader, test_ids, test_dataset = get_loader_miccai(4);
     
     # model.eval();
-    valid_loss = valid(model, test_loader, total_data);
+    valid_loss = valid(model, test_ids, test_dataset);
