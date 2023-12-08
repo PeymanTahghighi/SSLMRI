@@ -798,7 +798,7 @@ def get_loader_pretrain_miccai(fold):
     mri_dataset_train = MICCAI_PRETRAIN_Dataset(mri_paths);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
     test_mri = glob(os.path.join('cache_miccai',f'{fold}','*.tstd'));
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri[:1], train=False);
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
     return train_loader, test_loader; 
