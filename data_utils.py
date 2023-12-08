@@ -371,9 +371,9 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
 
 
                 num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
-                for i in range(num_corrupted_patches):
-                    mrimage_noisy, heatmap, noise, center = inpaint_3d(mrimage_noisy, g_c)
-                    total_heatmap += heatmap;
+                #for i in range(1):
+                mrimage_noisy, heatmap, noise, center = inpaint_3d(mrimage_noisy, g_c, num_corrupted_patches)
+                total_heatmap += heatmap;
                 
                 total_heatmap = total_heatmap * mask_c;
                 mrimage_noisy = mrimage_noisy * mask_c;
@@ -690,13 +690,16 @@ class MICCAI_Dataset(Dataset):
                                 (loc[1].item())*self.step_h:((loc[1].item()))*self.step_h + config.hyperparameters['crop_size_h'], 
                                 (loc[2].item())*self.step_d:((loc[2].item()))*self.step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
 
-    def calculate_metrics(self):
+    def calculate_metrics(self, simple = True):
         ret = [];
-        for k in self.pred_data.keys():
-            dice = calculate_metric_percase(self.pred_data[k].squeeze(), self.gt_data[k].squeeze(), simple=True);
+        for k in tqdm(self.pred_data.keys()):
+            if simple is True:
+                dice = calculate_metric_percase(self.pred_data[k].squeeze(), self.gt_data[k].squeeze(), simple=simple);
+            else:
+                dice,hd,f1 = calculate_metric_percase(self.pred_data[k].squeeze(), self.gt_data[k].squeeze(), simple=simple);
             if np.sum(self.gt_data[k].squeeze()) > 0:
-                ret.append(dice);
-        return np.mean(ret);
+                ret.append(dice if simple is True else [dice, hd, f1]);
+        return np.mean(ret) if simple is True else np.mean(np.array(ret), axis =0);
 
 
 def update_folds(num_test_data = 200):
@@ -779,11 +782,14 @@ def get_loader_pretrain_miccai(fold):
     
     train_mri, test_mri = pickle.load(open(f'cache_miccai/{fold}.fold', 'rb'));
 
-    train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{fold}.fold'), 'rb'));
-    train_ids = ['015','016','018','019', '020', '021', '024', '029', '030', '032', '035', '037', '039', '043', '047', '048', '049', '051', '052', '057', '061', '068', '069', '070', '074', '077', '083', '084', '088', '089', '090', '096'];
-    test_ids = ['013', '026', '027', '091', '094', '095', '099', '100'];
+    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
+        train_ids = f.readline().rstrip();
+        train_ids = train_ids.split(',');
+        test_ids = f.readline().rstrip();
+        test_ids = test_ids.split(',');
     train_ids =  [os.path.join('miccai-processed', t) for t in train_ids];
     test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
+    
     mri_paths = [];
     for t in train_ids:
         mri_paths.append(os.path.join(t, 'flair_time01_on_middle_space.nii.gz'));
@@ -792,7 +798,7 @@ def get_loader_pretrain_miccai(fold):
     mri_dataset_train = MICCAI_PRETRAIN_Dataset(mri_paths);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
     test_mri = glob(os.path.join('cache_miccai',f'{fold}','*.tstd'));
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri, train=False);
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri[:1], train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
     return train_loader, test_loader; 
@@ -809,7 +815,7 @@ def get_loader_miccai(fold):
 
 
 
-    mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
+    mri_dataset_train = MICCAI_Dataset(train_ids[:1], train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
     mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
@@ -839,37 +845,44 @@ def visualize_2d(images, slice,):
         ax[i][2].imshow(img[:,:,slice[2]], cmap='gray');
     plt.show()
 
-def inpaint_3d(img, mask_g):
+def inpaint_3d(img, mask_g, num_corrupted_patches):
     
     mri = img;
 
     _,h,w,d = mri.shape;
 
-    mask_cpy = deepcopy(mask_g);
-    size_x = np.random.randint(5,15) if config.hyperparameters['deterministic'] is False else 15;
-    size_y = np.random.randint(5,20) if config.hyperparameters['deterministic'] is False else 15;
-    size_z = np.random.randint(5,20) if config.hyperparameters['deterministic'] is False else 15;
-    mask_cpy[:,:,:,d-size_z:] = 0;
-    mask_cpy[:,:,:,:size_z+1] = 0;
-    mask_cpy[:,:,w-size_y:,:] = 0;
-    mask_cpy[:,:,:size_y+1,:] = 0;
-    mask_cpy[:,h-size_x:,:,:] = 0;
-    mask_cpy[:,:size_x+1,:,:] = 0;
-    pos_cords = np.where(mask_cpy==1);
+    cubes = [];
+    for n in range(num_corrupted_patches):
+        mask_cpy = deepcopy(mask_g);
+        size_x = np.random.randint(5,15) if config.hyperparameters['deterministic'] is False else 15;
+        size_y = np.random.randint(5,20) if config.hyperparameters['deterministic'] is False else 15;
+        size_z = np.random.randint(5,20) if config.hyperparameters['deterministic'] is False else 15;
+        mask_cpy[:,:,:,d-size_z:] = 0;
+        mask_cpy[:,:,:,:size_z+1] = 0;
+        mask_cpy[:,:,w-size_y:,:] = 0;
+        mask_cpy[:,:,:size_y+1,:] = 0;
+        mask_cpy[:,h-size_x:,:,:] = 0;
+        mask_cpy[:,:size_x+1,:,:] = 0;
+        pos_cords = np.where(mask_cpy==1);
 
-    if config.hyperparameters['deterministic'] is False:
-        if len(pos_cords[0]) != 0:
-            r = np.random.randint(0,len(pos_cords[0]));
-            center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+        if config.hyperparameters['deterministic'] is False:
+            if len(pos_cords[0]) != 0:
+                r = np.random.randint(0,len(pos_cords[0]));
+                center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+            else:
+                center = [img.shape[0]//2, img.shape[1]//2, img.shape[2]//2]
         else:
-            center = [img.shape[0]//2, img.shape[1]//2, img.shape[2]//2]
-    else:
-        center = [pos_cords[1][50], pos_cords[2][50],pos_cords[3][50]]
+            center = [pos_cords[1][50], pos_cords[2][50],pos_cords[3][50]]
+        
+        cubes.append([center, size_x, size_y, size_z]);
     
  
     #shape
     cube = np.zeros((1,h,w,d), dtype=np.uint8);
-    cube[:,max(center[0]-size_x,0):min(center[0]+size_x, h), max(center[1]-size_y,0):min(center[1]+size_y,w), max(center[2]-size_z,0):min(center[2]+size_z,d)] = 1;
+    for c in cubes:
+        cube[:,max(c[0][0]-c[1],0):min(c[0][0]+c[1], h), \
+             max(c[0][1]-c[2],0):min(c[0][1]+c[2],w), \
+             max(c[0][2]-c[3],0):min(c[0][2]+c[3],d)] = 1;
 
     #cube = transform(cube);
     cube_thresh = (cube>0)

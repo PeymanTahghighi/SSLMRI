@@ -44,7 +44,7 @@ def valid(model, loader, dataset):
             pred = pred_lbl_1 * pred_lbl_2 * brainmask;
             dataset.update_prediction(pred, patient_id[0], loc);
     
-    epoch_dice = dataset.calculate_metrics();
+    epoch_dice = dataset.calculate_metrics(simple = False);
     return epoch_dice;
     # with torch.no_grad():
     #     pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
@@ -238,7 +238,6 @@ def normalize(img):
     img = (img - np.min(img));
     img = img/np.max(img);
     return img;
-
 
 def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False):
     file_name = os.path.basename(first_mri_path);
@@ -748,8 +747,68 @@ def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cac
         d, hd, f1 = calculate_metric_percase(final_pred.numpy(), gt_padded.numpy());
         return dice, hd, f1, gt_lbl;
 
+def get_expert_results(fold):
+    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
+        train_ids = f.readline().rstrip();
+        train_ids = train_ids.split(',');
+        test_ids = f.readline().rstrip();
+        test_ids = test_ids.split(',');
+    test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
+    exp1 = [];
+    exp2 = [];
+    exp3 = [];
+    exp4 = [];
+    for t in tqdm(test_ids):
+        g1 = nib.load(os.path.join(t, 'ground_truth_expert1.nii.gz'));
+        g2 = nib.load(os.path.join(t, 'ground_truth_expert2.nii.gz'));
+        g3 = nib.load(os.path.join(t, 'ground_truth_expert3.nii.gz'));
+        g4 = nib.load(os.path.join(t, 'ground_truth_expert4.nii.gz'));
+        g = nib.load(os.path.join(t, 'ground_truth.nii.gz'));
+        g1 = g1.get_fdata();
+        g2 = g2.get_fdata();
+        g3 = g3.get_fdata();
+        g4 = g4.get_fdata();
+        g = g.get_fdata();
+        dice1, hd1, f11 = calculate_metric_percase(g1, g, simple=False);
+        dice2, hd2, f12 = calculate_metric_percase(g2, g, simple=False);
+        dice3, hd3, f13 = calculate_metric_percase(g3, g, simple=False);
+        dice4, hd4, f14 = calculate_metric_percase(g4, g, simple=False);
+        exp1.append([dice1, hd1, f11]);
+        exp2.append([dice2, hd2, f12]);
+        exp3.append([dice3, hd3, f13]);
+        exp4.append([dice4, hd4, f14]);
+    exp1 = np.mean(np.array(exp1), axis=0);
+    exp2 = np.mean(np.array(exp2), axis=0);
+    exp3 = np.mean(np.array(exp3), axis=0);
+    exp4 = np.mean(np.array(exp4), axis=0);
+    print(f'Expert1 results fold {fold} :\ndice: {exp1[0]}\thd: {exp1[1]}\tf1: {exp1[2]}');
+    print(f'\nExpert2 results fold {fold} :\ndice: {exp2[0]}\thd: {exp2[1]}\tf1: {exp2[2]}');
+    print(f'\nExpert3 results fold {fold} :\ndice: {exp3[0]}\thd: {exp3[1]}\tf1: {exp3[2]}');
+    print(f'\nExpert4 results fold {fold} :\ndice: {exp4[0]}\thd: {exp4[1]}\tf1: {exp4[2]}');
+
+def get_snac_results(fold):
+
+    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
+        train_ids = f.readline().rstrip();
+        train_ids = train_ids.split(',');
+        test_ids = f.readline().rstrip();
+        test_ids = test_ids.split(',');
+    test_ids = [os.path.join('miccai', t) for t in test_ids];
+    SNAC_res = [];
+    for t in tqdm(test_ids):
+        g1 = nib.load(os.path.join(t, 'positive_activity_final.nii.gz'));
+        g = nib.load(os.path.join(t, 'ground_truth.nii.gz'));
+        g1 = g1.get_fdata();
+        g = g.get_fdata();
+        dice1, hd1, f11 = calculate_metric_percase(g1, g, simple=False);
+        SNAC_res.append([dice1, hd1, f11]);
+    SNAC_res = np.mean(np.array(SNAC_res), axis=0);
+    print(f'Expert1 results fold {fold} :\ndice: {SNAC_res[0]}\thd: {SNAC_res[1]}\tf1: {SNAC_res[2]}');
+
 if __name__ == "__main__":
 
+    #get_expert_results(4);
+    get_snac_results(4);
     #cache_dataset();
     # reader = sitk.ImageSeriesReader()
 
@@ -758,6 +817,7 @@ if __name__ == "__main__":
 
     # image = reader.Execute()
     # sitk.WriteImage(image, f'test.nii.gz')
+    FOLD = 1;
 
     model = UNet3D(
             spatial_dims=3,
@@ -768,11 +828,11 @@ if __name__ == "__main__":
             num_res_units=2,
             );
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load('best_model.ckpt');
+    ckpt = torch.load(os.path.join('exp', f'BL+DICE_AUGMENTATION-NOT PRETRAINED-BL=5-F{FOLD}', 'best_model.ckpt'));
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 
-    train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{0}.fold'), 'rb'));
+    train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{FOLD}.fold'), 'rb'));
 
     model.eval();
     #predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
@@ -799,7 +859,8 @@ if __name__ == "__main__":
     # print(f"hd:{np.mean(total_hd)}");
     # print(f"f1:{np.mean(total_f1)}");
 
-    train_loader, test_ids, test_dataset = get_loader_miccai(4);
+    train_loader, test_ids, test_dataset = get_loader_miccai(FOLD);
     
     # model.eval();
-    valid_loss = valid(model, test_ids, test_dataset);
+    valid_res = valid(model, test_ids, test_dataset);
+    print(valid_res);

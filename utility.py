@@ -20,17 +20,14 @@ class BounraryLoss(object):
         return bl.mean();
 
 def calculate_metric_percase(pred, gt, simple = False):
-    s = np.sum(gt);
+    sgt = np.count_nonzero(gt);
+    spred = np.count_nonzero(pred);
     dice = mp.dc(pred, gt)
     hd = 0;
     f1 = 0;
     if simple is False:
-        if s!=0:
+        if sgt!=0 and spred!=0:
             hd = mp.hd95(pred, gt)
-            asd = mp.asd(pred, gt)
-            precision = mp.precision(pred, gt)
-            se = mp.sensitivity(pred, gt)
-            sp = mp.specificity(pred, gt)
             label_gt = label(gt)
             label_gts = np.bincount(label_gt.flat)
             label_pred = label(pred)
