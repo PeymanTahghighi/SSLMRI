@@ -19,7 +19,7 @@ from patchify import patchify
 import seaborn as sns
 from scipy.ndimage import distance_transform_edt, sobel, histogram, prewitt,laplace, gaussian_filter
 from monai.losses.dice import DiceLoss
-from utility import calculate_metric_percase
+from utility import calculate_metric_percase, remove_small_regions
 
 
 def window_center_adjustment(img):
@@ -688,7 +688,7 @@ class MICCAI_Dataset(Dataset):
     def update_prediction(self, pred, patient_id, loc):
         self.pred_data[patient_id][(loc[0].item())*self.step_w:(loc[0].item())*self.step_w + config.hyperparameters['crop_size_w'], 
                                 (loc[1].item())*self.step_h:((loc[1].item()))*self.step_h + config.hyperparameters['crop_size_h'], 
-                                (loc[2].item())*self.step_d:((loc[2].item()))*self.step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
+                                (loc[2].item())*self.step_d:((loc[2].item()))*self.step_d + config.hyperparameters['crop_size_d']] = np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
 
     def calculate_metrics(self, simple = True):
         ret = [];
@@ -696,7 +696,8 @@ class MICCAI_Dataset(Dataset):
             if simple is True:
                 dice = calculate_metric_percase(self.pred_data[k].squeeze(), self.gt_data[k].squeeze(), simple=simple);
             else:
-                dice,hd,f1 = calculate_metric_percase(self.pred_data[k].squeeze(), self.gt_data[k].squeeze(), simple=simple);
+                pred  = remove_small_regions(self.pred_data[k].squeeze());
+                dice,hd,f1 = calculate_metric_percase(pred, self.gt_data[k].squeeze(), simple=simple);
             if np.sum(self.gt_data[k].squeeze()) > 0:
                 ret.append(dice if simple is True else [dice, hd, f1]);
         return np.mean(ret) if simple is True else np.mean(np.array(ret), axis =0);
@@ -815,7 +816,7 @@ def get_loader_miccai(fold):
 
 
 
-    mri_dataset_train = MICCAI_Dataset(train_ids[:1], train=True);
+    mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
     mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);

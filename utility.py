@@ -3,6 +3,8 @@ import numpy as np
 from torch import einsum
 import medpy as mp
 from skimage.measure import label
+from functools import reduce
+from scipy import ndimage as nd
 
 def IoU(mri1, mri2):
     dims = [d for d in range(1, mri1.ndim)];
@@ -91,3 +93,24 @@ def calculate_metric_percase(pred, gt, simple = False):
         return dice, hd, f1;
     else:
         return dice;
+
+def remove_small_regions(img_vol, min_size=3):
+    """
+        Function that removes blobs with a size smaller than a minimum from a mask
+        volume.
+        :param img_vol: Mask volume. It should be a numpy array of type bool.
+        :param min_size: Minimum size for the blobs.
+        :return: New mask without the small blobs.
+    """
+    blobs, _ = nd.measurements.label(
+        img_vol,
+        nd.morphology.generate_binary_structure(3, 3)
+    )
+    labels = list(filter(bool, np.unique(blobs)))
+    areas = [np.count_nonzero(np.equal(blobs, lab)) for lab in labels]
+    nu_labels = [lab for lab, a in zip(labels, areas) if a >= min_size]
+    nu_mask = reduce(
+        lambda x, y: np.logical_or(x, y),
+        [np.equal(blobs, lab) for lab in nu_labels]
+    ) if nu_labels else np.zeros_like(img_vol)
+    return nu_mask

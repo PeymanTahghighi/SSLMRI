@@ -769,14 +769,15 @@ def get_expert_results(fold):
         g3 = g3.get_fdata();
         g4 = g4.get_fdata();
         g = g.get_fdata();
-        dice1, hd1, f11 = calculate_metric_percase(g1, g, simple=False);
-        dice2, hd2, f12 = calculate_metric_percase(g2, g, simple=False);
-        dice3, hd3, f13 = calculate_metric_percase(g3, g, simple=False);
-        dice4, hd4, f14 = calculate_metric_percase(g4, g, simple=False);
-        exp1.append([dice1, hd1, f11]);
-        exp2.append([dice2, hd2, f12]);
-        exp3.append([dice3, hd3, f13]);
-        exp4.append([dice4, hd4, f14]);
+        if np.count_nonzero(g) > 0:
+            dice1, hd1, f11 = calculate_metric_percase(g1, g, simple=False);
+            dice2, hd2, f12 = calculate_metric_percase(g2, g, simple=False);
+            dice3, hd3, f13 = calculate_metric_percase(g3, g, simple=False);
+            dice4, hd4, f14 = calculate_metric_percase(g4, g, simple=False);
+            exp1.append([dice1, hd1, f11]);
+            exp2.append([dice2, hd2, f12]);
+            exp3.append([dice3, hd3, f13]);
+            exp4.append([dice4, hd4, f14]);
     exp1 = np.mean(np.array(exp1), axis=0);
     exp2 = np.mean(np.array(exp2), axis=0);
     exp3 = np.mean(np.array(exp3), axis=0);
@@ -801,14 +802,15 @@ def get_snac_results(fold):
         g1 = g1.get_fdata();
         g = g.get_fdata();
         dice1, hd1, f11 = calculate_metric_percase(g1, g, simple=False);
-        SNAC_res.append([dice1, hd1, f11]);
+        if np.count_nonzero(g) > 0:
+            SNAC_res.append([dice1, hd1, f11]);
     SNAC_res = np.mean(np.array(SNAC_res), axis=0);
     print(f'Expert1 results fold {fold} :\ndice: {SNAC_res[0]}\thd: {SNAC_res[1]}\tf1: {SNAC_res[2]}');
 
 if __name__ == "__main__":
 
     #get_expert_results(4);
-    get_snac_results(4);
+    #get_snac_results(1);
     #cache_dataset();
     # reader = sitk.ImageSeriesReader()
 
@@ -817,7 +819,7 @@ if __name__ == "__main__":
 
     # image = reader.Execute()
     # sitk.WriteImage(image, f'test.nii.gz')
-    FOLD = 1;
+    FOLD = 0;
 
     model = UNet3D(
             spatial_dims=3,
@@ -828,7 +830,7 @@ if __name__ == "__main__":
             num_res_units=2,
             );
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load(os.path.join('exp', f'BL+DICE_AUGMENTATION-NOT PRETRAINED-BL=5-F{FOLD}', 'best_model.ckpt'));
+    ckpt = torch.load(os.path.join('exp', f'Pretraining-F{FOLD}', 'best_model.ckpt'));
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 
