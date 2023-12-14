@@ -540,7 +540,6 @@ class UNet3D(nn.Module):
         return out;
 #---------------------------------------------------------------
 
-
 class CrossAttentionUNet3D(nn.Module):
 
     def __init__(
@@ -731,9 +730,9 @@ class CrossAttentionUNet3D(nn.Module):
 
 def test():
 
-    sample = torch.rand((1,1,64,128,128)).to('cuda');
+    sample = torch.rand((1,1,96,96,96)).to('cuda');
 
-    net = UNet3D(
+    net = CrossAttentionUNet3D(
         spatial_dims=3,
         in_channels=1,
         out_channels=1,

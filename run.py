@@ -1,4 +1,4 @@
-from data_utils import cache_test_dataset_miccai,cache_mri_gradients, get_loader_pretrain_miccai, get_loader, cache_test_dataset, update_folds, update_folds_isbi, visualize_2d, update_folds_miccai, get_loader_miccai
+from data_utils import cache_dataset_miccai,cache_miccai21_gradients, get_loader_pretrain_miccai, get_loader, cache_test_dataset, update_folds, update_folds_isbi, visualize_2d, update_folds_miccai, get_loader_miccai
 from data_utils import predict_on_miccai
 import matplotlib.pyplot as plt
 import numpy as np
@@ -394,9 +394,9 @@ if __name__ == "__main__":
     #update_folds_isbi();
     #cache_mri_gradients();
     #update_folds_miccai();
-    #cache_test_dataset_miccai(200,0);
+    cache_dataset_miccai(200);
 
-    EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-NEW MODEL-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
+    EXP_NAME = f"Pretraining MICCAI16";
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
@@ -407,64 +407,54 @@ if __name__ == "__main__":
         num_res_units=2,
         ).to('cuda')
     
-    if config.PRETRAINED:
-        ckpt = torch.load(config.PRERTRAIN_PATH);
-        #only load weights for encoder
-        weights = dict();
-        for k in ckpt['model'].keys():
-            if 'up_layer' not in k:
-                weights[k] = ckpt['model'][k];
-        model.load_state_dict(weights, strict=False);
-    
     if RESUME is True:
-        ckpt = torch.load('resume.ckpt');
+        ckpt = torch.load(os.path.join('exp', EXP_NAME, 'resume.ckpt'));
         model.load_state_dict(ckpt['model']);
 
     model.to('cuda');
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
     optimizer = optim.AdamW(model.parameters(), lr = config.hyperparameters['learning_rate']);
 
-    lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-5);
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-6);
     summary_writer = SummaryWriter(os.path.join('exp', EXP_NAME));
-    best_dice = 0;
+    best_loss = 100;
     start_epoch = 0;
 
     if RESUME is True:
         optimizer.load_state_dict(ckpt['optimizer']);
         lr_scheduler.load_state_dict(ckpt['scheduler']);
-        best_dice = ckpt['best_dice'];
+        best_loss = ckpt['best_loss'];
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_ids, test_dataset = get_loader_miccai(config.FOLD);
+    train_loader, test_loader = get_loader_pretrain_miccai(config.FOLD);
     sample_output_interval = 10;
-    print(EXP_NAME);
-    for epoch in range(start_epoch, 1000):
+    for epoch in range(start_epoch, 500):
         model.train();
-        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
+        train_loss = train_miccai_pretrain(model, train_loader, optimizer, scalar); 
         
         model.eval();
-        valid_dice = valid_miccai(model, test_ids, test_dataset);
+        valid_loss = valid_pretrain_miccai(model, test_loader);
         summary_writer.add_scalar('train/loss', train_loss, epoch);
-        summary_writer.add_scalar('valid/loss', valid_dice, epoch);
-        # if epoch %sample_output_interval == 0:
-        #     print('sampling outputs...');
-        #     #save_examples_miccai(model, test_loader);
+        summary_writer.add_scalar('valid/loss', valid_loss, epoch);
+        if epoch %sample_output_interval == 0:
+            print('sampling outputs...');
+            save_examples(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'scheduler': lr_scheduler.state_dict(),
-            'best_dice': best_dice,
+            'best_loss': best_loss,
             'epoch': epoch+1
         }
         torch.save(ckpt,os.path.join('exp', EXP_NAME, 'resume.ckpt'));
-        lr_scheduler.step();
+        #lr_scheduler.step();
 
-        if best_dice < valid_dice:
-            print(f'new best model found: {valid_dice}')
-            best_dice = valid_dice;
+        if best_loss > valid_loss:
+            print(f'new best model found: {valid_loss}')
+            best_loss = valid_loss;
             torch.save({'model': model.state_dict(), 
-                        'best_dice': best_dice,
+                        'best_loss': best_loss,
                         'hp': config.hyperparameters,
                         'log': EXP_NAME}, os.path.join('exp', EXP_NAME, 'best_model.ckpt'));
 
