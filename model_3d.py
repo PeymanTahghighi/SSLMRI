@@ -11,7 +11,6 @@ from monai.networks.blocks.convolutions import Convolution, ResidualUnit
 from monai.networks.layers.factories import Act
 from typing import Optional, Sequence, Tuple, Union
 import warnings
-import numpy as np
 #===============================================================
 #===============================================================
 
@@ -65,27 +64,26 @@ class UpLayer(nn.Module):
                 norm=self.norm,
                 dropout=self.dropout,
                 bias=self.bias,
-                conv_only=True,
+                conv_only=is_top and self.num_res_units == 0,
                 is_transposed=True,
                 adn_ordering=self.adn_ordering,
             )
 
             if self.num_res_units > 0:
-                self.conv=ResConvBlock(in_channels=out_channels, out_channels=out_channels, kernel_size=7);
-                # self.conv = ResidualUnit(
-                #     self.dimensions,
-                #     out_channels,
-                #     out_channels,
-                #     strides=1,
-                #     kernel_size=self.kernel_size,
-                #     subunits=self.num_res_units,
-                #     act=self.act,
-                #     norm=self.norm,
-                #     dropout=self.dropout,
-                #     bias=self.bias,
-                #     last_conv_only=is_top,
-                #     adn_ordering=self.adn_ordering,
-                # )
+                self.conv = ResidualUnit(
+                    self.dimensions,
+                    out_channels,
+                    out_channels,
+                    strides=1,
+                    kernel_size=self.kernel_size,
+                    subunits=self.num_res_units,
+                    act=self.act,
+                    norm=self.norm,
+                    dropout=self.dropout,
+                    bias=self.bias,
+                    last_conv_only=is_top,
+                    adn_ordering=self.adn_ordering,
+                )
         def forward(self, x):
             x = self.upsample(x);
             return self.conv(x);
@@ -112,23 +110,21 @@ class ResConvBlock(nn.Module):
     2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR), New Orleans, LA, USA, 2022, pp. 
     11966-11976, doi: 10.1109/CVPR52688.2022.01167.
     '''
-    def __init__(self, in_channels, out_channels, kernel_size, strides=1) -> None:
+    def __init__(self, in_channels, out_channels, kernel_size) -> None:
         super().__init__();
         self.res_block = nn.Sequential(
         nn.Conv3d(in_channels, 
                   out_channels,
                   kernel_size, 
-                  padding=kernel_size//2,
-                  stride=strides,
-                  groups=in_channels),
+                  padding=kernel_size//2),
         nn.BatchNorm3d(out_channels),
         nn.Conv3d(out_channels, out_channels*2, kernel_size=1),
         nn.GELU(),
         nn.Conv3d(out_channels*2, out_channels, kernel_size=1)
         )
 
-        if np.prod(strides) != 1 or in_channels != out_channels:
-            self.extra_conv = nn.Conv3d(in_channels, out_channels, kernel_size, padding=kernel_size//2, stride=strides);
+        if in_channels != out_channels:
+            self.extra_conv = nn.Conv3d(in_channels, out_channels, kernel_size);
     def forward(self, x):
         return self.res_block(x) + self.extra_conv(x) if hasattr(self, 'extra_conv') else x;
 #---------------------------------------------------------------
@@ -449,38 +445,59 @@ class UNet3D(nn.Module):
         """
         mod: nn.Module
         if self.num_res_units > 0:
-            mod = ResConvBlock(in_channels, 
-                               out_channels,
-                               kernel_size=7,
-                               strides=strides);
 
-            #mod = ResidualUnit(
-            #     self.dimensions,
-            #     in_channels,
-            #     out_channels,
-            #     strides=strides,
-            #     kernel_size=self.kernel_size,
-            #     subunits=self.num_res_units,
-            #     act=self.act,
-            #     norm=self.norm,
-            #     dropout=self.dropout,
-            #     bias=self.bias,
-            #     adn_ordering=self.adn_ordering,
-            # )
+            mod = ResidualUnit(
+                self.dimensions,
+                in_channels,
+                out_channels,
+                strides=strides,
+                kernel_size=self.kernel_size,
+                subunits=self.num_res_units,
+                act=self.act,
+                norm=self.norm,
+                dropout=self.dropout,
+                bias=self.bias,
+                adn_ordering=self.adn_ordering,
+            )
             return mod
-        
+        mod = Convolution(
+            self.dimensions,
+            in_channels,
+            out_channels,
+            strides=strides,
+            kernel_size=self.kernel_size,
+            act=self.act,
+            norm=self.norm,
+            dropout=self.dropout,
+            bias=self.bias,
+            adn_ordering=self.adn_ordering,
+        )
+        return mod
     
     def _make_squeeze_excitation(self, feature_size):
         feature_selection = nn.Sequential(
             ConvBlock(feature_size*2, feature_size, 1, 1, act=False),
         )
-        refinement = ResConvBlock(
+        refinement = ResidualUnit(
+                self.dimensions,
                 feature_size,
                 feature_size,
+                strides=1,
                 kernel_size=self.kernel_size,
+                subunits=self.num_res_units,
+                act=self.act,
+                norm=self.norm,
+                dropout=self.dropout,
+                bias=self.bias,
+                adn_ordering=self.adn_ordering,
             )
+
         atten = nn.Sequential(
             nn.AdaptiveAvgPool3d(1),
+            nn.Flatten(),
+            nn.Linear(feature_size, feature_size//2),
+            nn.LeakyReLU(0.2),
+            nn.Linear(feature_size//2, feature_size),
             nn.Sigmoid()
         )
 
@@ -492,6 +509,7 @@ class UNet3D(nn.Module):
         d_selection = self.feature_selection_modules[idx](d);
         d_refine = self.feature_refinement_modules[idx](d_selection);
         d_attn = self.feature_attention_modules[idx](d_refine);
+        d_attn = torch.reshape(d_attn, [d_attn.shape[0], d_attn.shape[1], 1, 1, 1]);
         d_refine = d_refine * d_attn;
         return F.leaky_relu(d_refine + d_selection, 0.2, inplace=True);
 
@@ -626,7 +644,6 @@ class CrossAttentionUNet3D(nn.Module):
 
         self.final = nn.Sequential(
             ConvBlock(rev_channels[-1],1,1,1),
-            nn.Tanh()
         )
 
         self._init_weights();
