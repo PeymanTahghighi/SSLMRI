@@ -431,6 +431,9 @@ class UNet3D(nn.Module):
             elif isinstance(m, nn.BatchNorm3d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
+            elif isinstance(m, nn.Linear):
+                m.weight = nn.init.kaiming_normal_(m.weight);
+                m.bias = nn.init.constant_(m.bias, 0);
     def _get_down_layer(self, in_channels: int, out_channels: int, strides: int, is_top: bool) -> nn.Module:
         """
         Returns the encoding (down) part of a layer of the network. This typically will downsample data at some point
@@ -732,7 +735,7 @@ def test():
 
     sample = torch.rand((1,1,96,96,96)).to('cuda');
 
-    net = CrossAttentionUNet3D(
+    net = UNet3D(
         spatial_dims=3,
         in_channels=1,
         out_channels=1,
