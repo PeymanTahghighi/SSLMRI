@@ -394,7 +394,7 @@ if __name__ == "__main__":
     #update_folds_isbi();
     #cache_mri_gradients();
     #update_folds_miccai();
-    cache_dataset_miccai(200);
+    #cache_dataset_miccai(200);
 
     EXP_NAME = f"Pretraining MICCAI16";
     RESUME = False;

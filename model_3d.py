@@ -431,9 +431,6 @@ class UNet3D(nn.Module):
             elif isinstance(m, nn.BatchNorm3d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
-            elif isinstance(m, nn.Linear):
-                m.weight = nn.init.kaiming_normal_(m.weight);
-                m.bias = nn.init.constant_(m.bias, 0);
     def _get_down_layer(self, in_channels: int, out_channels: int, strides: int, is_top: bool) -> nn.Module:
         """
         Returns the encoding (down) part of a layer of the network. This typically will downsample data at some point
@@ -481,26 +478,13 @@ class UNet3D(nn.Module):
         feature_selection = nn.Sequential(
             ConvBlock(feature_size*2, feature_size, 1, 1, act=False),
         )
-        refinement = ResidualUnit(
-                self.dimensions,
+        refinement = ResConvBlock(
                 feature_size,
                 feature_size,
-                strides=1,
                 kernel_size=self.kernel_size,
-                subunits=self.num_res_units,
-                act=self.act,
-                norm=self.norm,
-                dropout=self.dropout,
-                bias=self.bias,
-                adn_ordering=self.adn_ordering,
             )
-
         atten = nn.Sequential(
             nn.AdaptiveAvgPool3d(1),
-            nn.Flatten(),
-            nn.Linear(feature_size, feature_size//2),
-            nn.LeakyReLU(0.2),
-            nn.Linear(feature_size//2, feature_size),
             nn.Sigmoid()
         )
 
@@ -512,7 +496,6 @@ class UNet3D(nn.Module):
         d_selection = self.feature_selection_modules[idx](d);
         d_refine = self.feature_refinement_modules[idx](d_selection);
         d_attn = self.feature_attention_modules[idx](d_refine);
-        d_attn = torch.reshape(d_attn, [d_attn.shape[0], d_attn.shape[1], 1, 1, 1]);
         d_refine = d_refine * d_attn;
         return F.leaky_relu(d_refine + d_selection, 0.2, inplace=True);
 
@@ -542,6 +525,7 @@ class UNet3D(nn.Module):
 
         return out;
 #---------------------------------------------------------------
+
 
 class CrossAttentionUNet3D(nn.Module):
 
@@ -646,6 +630,7 @@ class CrossAttentionUNet3D(nn.Module):
 
         self.final = nn.Sequential(
             ConvBlock(rev_channels[-1],1,1,1),
+            nn.Tanh()
         )
 
         self._init_weights();
@@ -733,7 +718,7 @@ class CrossAttentionUNet3D(nn.Module):
 
 def test():
 
-    sample = torch.rand((1,1,96,96,96)).to('cuda');
+    sample = torch.rand((1,1,64,128,128)).to('cuda');
 
     net = UNet3D(
         spatial_dims=3,
