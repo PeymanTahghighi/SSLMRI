@@ -8,9 +8,11 @@ import torch.nn.functional as F
 import config
 from resnet import resnet50
 from monai.networks.blocks.convolutions import Convolution, ResidualUnit
-from monai.networks.layers.factories import Act
+from monai.networks.nets.unet import UNet
 from typing import Optional, Sequence, Tuple, Union
 import warnings
+import numpy as np
+from copy import deepcopy
 #===============================================================
 #===============================================================
 
@@ -23,7 +25,7 @@ class UpLayer(nn.Module):
                     is_top: bool = False,
                     kernel_size: Union[Sequence[int], int] = 3,
                     num_res_units: int = 0,
-                    act: Union[Tuple, str] = Act.PRELU,
+                    act: Union[Tuple, str] = "PRELU",
                     norm: Union[Tuple, str] = "BATCH",
                     dropout: float = 0.0,
                     bias: bool = True,
@@ -331,7 +333,7 @@ class UNet3D(nn.Module):
         kernel_size: Union[Sequence[int], int] = 3,
         up_kernel_size: Union[Sequence[int], int] = 3,
         num_res_units: int = 0,
-        act: Union[Tuple, str] = Act.PRELU,
+        act: Union[Tuple, str] = "PRELU",
         norm: Union[Tuple, str] = "BATCH",
         dropout: float = 0.0,
         bias: bool = True,
@@ -524,6 +526,22 @@ class UNet3D(nn.Module):
         out = self.final(up);
 
         return out;
+
+    def load_pretrained_monai_unet3d(self):
+        ckpt = torch.load('pretrained\\spleen_ct_segmentation\\model.pt');
+
+        sdn = self.state_dict()
+
+        sdn_keys = list(sdn.keys());
+        sdm_keys = list(ckpt.keys());
+        n = np.zeros((5,5));
+        
+        for i in range(len(sdm_keys)):
+            k = sdn_keys[i]
+            if sdn[k].shape ==  ckpt[sdm_keys[i]].shape:
+                sdn[k] = ckpt[sdm_keys[i]];
+                print(k);
+        self.load_state_dict(sdn, strict=False);
 #---------------------------------------------------------------
 
 
@@ -539,7 +557,7 @@ class CrossAttentionUNet3D(nn.Module):
         kernel_size: Union[Sequence[int], int] = 3,
         up_kernel_size: Union[Sequence[int], int] = 3,
         num_res_units: int = 0,
-        act: Union[Tuple, str] = Act.PRELU,
+        act: Union[Tuple, str] = "PRELU",
         norm: Union[Tuple, str] = "BATCH",
         dropout: float = 0.0,
         bias: bool = True,
@@ -716,6 +734,8 @@ class CrossAttentionUNet3D(nn.Module):
 
         return out;
 
+
+
 def test():
 
     sample = torch.rand((1,1,64,128,128)).to('cuda');
@@ -724,11 +744,18 @@ def test():
         spatial_dims=3,
         in_channels=1,
         out_channels=1,
-        channels=(64, 128, 256, 512),
-        strides=(2, 2, 2),
+        channels=(16,
+            32,
+            64,
+            128,
+            256),
+        strides=(2, 2, 2, 2),
         num_res_units=2,
+        norm='batch'
         ).to('cuda')
     
+    net.load_pretrained_monai_unet3d();
+    aft = net.state_dict();
     total_parameters = sum(p.numel() for p in net.parameters() if p.requires_grad);
     print(f'total parameters: {total_parameters}')
     

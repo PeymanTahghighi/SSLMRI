@@ -830,14 +830,15 @@ if __name__ == "__main__":
             num_res_units=2,
             );
     total_parameters = sum(p.numel() for p in model.parameters());
-    ckpt = torch.load(os.path.join('exp', f'Pretraining-F{FOLD}', 'best_model.ckpt'));
+    ckpt = torch.load('best_model-pretrain-f0.ckpt');
     model.load_state_dict(ckpt['model']);
     model.to('cuda');
 
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{FOLD}.fold'), 'rb'));
 
     model.eval();
-    #predict_on_mri_3d('mri_data\\TUM20-20170928.nii.gz', 'mri_data\\TUM20-20180402.nii.gz', model, use_cached=False);
+    predict_on_mri_3d('miccai-processed\\016\\flair_time01_on_middle_space.nii.gz',
+                       'miccai-processed\\016\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
     total_dice = [];
     total_hd = [];
     total_f1 = [];

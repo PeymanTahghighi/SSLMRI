@@ -23,6 +23,13 @@ from utility import BounraryLoss
 import pickle
 from utility import calculate_metric_percase
 #===============================================================
+
+activation = {}
+def get_activation(name):
+    def hook(model, input, output):
+        activation[name] = output.detach()
+    return hook
+
 def dice_loss(input, 
                 target, 
                 eps=1e-7, 
@@ -235,6 +242,7 @@ def save_examples(model, loader,):
                 break;
 
 def train_miccai(model, train_loader, optimizer, scalar):
+    global activation;
     print(('\n' + '%10s'*3) %('Epoch', 'Loss', 'IoU'));
     pbar = tqdm(enumerate(train_loader), total= len(train_loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     epoch_loss = [];
@@ -252,8 +260,8 @@ def train_miccai(model, train_loader, optimizer, scalar):
             curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_distance_transform = distance_transform[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
-            assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
-            with torch.cuda.amp.autocast_mode.autocast():
+            assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap)) or not torch.any(torch.isnan(curr_distance_transform))
+            #with torch.cuda.amp.autocast_mode.autocast():
 
                 # hm1 = model(curr_mri, curr_mri_noisy);
                 # hm2 = model(curr_mri_noisy, curr_mri);
@@ -263,15 +271,16 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
                 # lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
-                hm1 = model(curr_mri, curr_mri_noisy);
-                hm2 = model(curr_mri_noisy, curr_mri);
-                lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
-                lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
+            hm1 = model(curr_mri, curr_mri_noisy);
+            hm2 = model(curr_mri_noisy, curr_mri);
+            lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
+            lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
 
-                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
-                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
-                lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
-                loss = (lhf1 + lhf2 + lhb1 + lhb2 + lhh)/ config.hyperparameters['virtual_batch_size'];
+            lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
+            lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
+            #lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
+            loss = (lhb1 + lhb2 + lhf1 + lhf2);
+                
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
@@ -388,6 +397,8 @@ def log_gradients_in_model(model, logger, step):
             logger.add_histogram(tag + "/grad", value.grad.cpu(), step)
             logger.add_histogram(tag + "/vals", value.cpu(), step)
 
+
+
 if __name__ == "__main__":
     
     #update_folds();
@@ -395,66 +406,76 @@ if __name__ == "__main__":
     #cache_mri_gradients();
     #update_folds_miccai();
     #cache_dataset_miccai(200);
-
-    EXP_NAME = f"Pretraining MICCAI16";
+    #torch.autograd.detect_anomaly() 
+    EXP_NAME = f"BL+DICE_AUGMENTATION-Not PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}-MONAI PRETRAINED";
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
         in_channels=1,
         out_channels=1,
-        channels=(64, 128, 256, 512),
-        strides=(2, 2, 2),
+        channels=(16,
+            32,
+            64,
+            128,
+            256),
+        strides=(2, 2, 2, 2),
         num_res_units=2,
+        norm='batch'
         ).to('cuda')
     
+    if config.PRETRAINED:
+        ckpt = torch.load(config.PRERTRAIN_PATH);
+        model.load_state_dict(ckpt['model']);
+    
     if RESUME is True:
-        ckpt = torch.load(os.path.join('exp', EXP_NAME, 'resume.ckpt'));
+        ckpt = torch.load(ckpt,os.path.join('exp', EXP_NAME, 'resume.ckpt'));
         model.load_state_dict(ckpt['model']);
 
     model.to('cuda');
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
     optimizer = optim.AdamW(model.parameters(), lr = config.hyperparameters['learning_rate']);
 
-    lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-6);
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-5);
     summary_writer = SummaryWriter(os.path.join('exp', EXP_NAME));
-    best_loss = 100;
+    best_dice = 0;
     start_epoch = 0;
 
     if RESUME is True:
         optimizer.load_state_dict(ckpt['optimizer']);
         lr_scheduler.load_state_dict(ckpt['scheduler']);
-        best_loss = ckpt['best_loss'];
+        best_dice = ckpt['best_dice'];
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_loader = get_loader_pretrain_miccai(config.FOLD);
+    train_loader, test_ids, test_dataset = get_loader_miccai(config.FOLD);
     sample_output_interval = 10;
-    for epoch in range(start_epoch, 500):
+    print(EXP_NAME);
+    for epoch in range(start_epoch, 1000):
         model.train();
-        train_loss = train_miccai_pretrain(model, train_loader, optimizer, scalar); 
+        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
         
         model.eval();
-        valid_loss = valid_pretrain_miccai(model, test_loader);
+        valid_dice = valid_miccai(model, test_ids, test_dataset);
         summary_writer.add_scalar('train/loss', train_loss, epoch);
-        summary_writer.add_scalar('valid/loss', valid_loss, epoch);
-        if epoch %sample_output_interval == 0:
-            print('sampling outputs...');
-            save_examples(model, test_loader);
+        summary_writer.add_scalar('valid/loss', valid_dice, epoch);
+        # if epoch %sample_output_interval == 0:
+        #     print('sampling outputs...');
+        #     #save_examples_miccai(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'scheduler': lr_scheduler.state_dict(),
-            'best_loss': best_loss,
+            'best_dice': best_dice,
             'epoch': epoch+1
         }
         torch.save(ckpt,os.path.join('exp', EXP_NAME, 'resume.ckpt'));
-        #lr_scheduler.step();
+        lr_scheduler.step();
 
-        if best_loss > valid_loss:
-            print(f'new best model found: {valid_loss}')
-            best_loss = valid_loss;
+        if best_dice < valid_dice:
+            print(f'new best model found: {valid_dice}')
+            best_dice = valid_dice;
             torch.save({'model': model.state_dict(), 
-                        'best_loss': best_loss,
+                        'best_dice': best_dice,
                         'hp': config.hyperparameters,
                         'log': EXP_NAME}, os.path.join('exp', EXP_NAME, 'best_model.ckpt'));
 

@@ -402,7 +402,7 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                 
                 total_heatmap_thresh = torch.where(diff > 0, 0, 1);
                 if config.DEBUG_TRAIN_DATA:
-                    visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, diff], center);
+                    visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, g_c], center);
                 
                 
                 mrimage_c = self.transforms(mrimage_c)[0];
@@ -802,7 +802,7 @@ def get_loader_pretrain_miccai(fold):
 
     mri_dataset_train = MICCAI_PRETRAIN_Dataset(train_mri);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    test_mri = glob(os.path.join('cache_miccai-2016',f'{fold}','*.tstd'));
+    test_mri = glob(os.path.join('cache_miccai-2016','*.tstd'));
     mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
