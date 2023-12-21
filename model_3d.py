@@ -528,7 +528,7 @@ class UNet3D(nn.Module):
         return out;
 
     def load_pretrained_monai_unet3d(self):
-        ckpt = torch.load('pretrained\\spleen_ct_segmentation\\model.pt');
+        ckpt = torch.load('pretrained/spleen_ct_segmentation/model.pt');
 
         sdn = self.state_dict()
 

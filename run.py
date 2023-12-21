@@ -423,6 +423,7 @@ if __name__ == "__main__":
         norm='batch'
         ).to('cuda')
     
+    model.load_pretrained_monai_unet3d();
     if config.PRETRAINED:
         ckpt = torch.load(config.PRERTRAIN_PATH);
         model.load_state_dict(ckpt['model']);
