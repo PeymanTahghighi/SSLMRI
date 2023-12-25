@@ -13,7 +13,7 @@ hyperparameters = {
     'bl_multiplier': 5
 }
 
-DEBUG_TRAIN_DATA = False;
+DEBUG_TRAIN_DATA = True;
 PRETRAINED = False
 FOLD = 0;
 PRERTRAIN_PATH = f'exp/Pretraining MICCAI16/best_model.ckpt';

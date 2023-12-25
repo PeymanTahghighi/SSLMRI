@@ -819,7 +819,7 @@ if __name__ == "__main__":
 
     # image = reader.Execute()
     # sitk.WriteImage(image, f'test.nii.gz')
-    FOLD = 0;
+    FOLD = 1;
 
     model = UNet3D(
             spatial_dims=3,
@@ -837,8 +837,8 @@ if __name__ == "__main__":
     train_ids, test_ids = pickle.load(open(os.path.join(f'cache_miccai',f'{FOLD}.fold'), 'rb'));
 
     model.eval();
-    predict_on_mri_3d('miccai-processed\\016\\flair_time01_on_middle_space.nii.gz',
-                       'miccai-processed\\016\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
+    predict_on_mri_3d('miccai-processed\\018\\flair_time01_on_middle_space.nii.gz',
+                       'miccai-processed\\018\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
     total_dice = [];
     total_hd = [];
     total_f1 = [];

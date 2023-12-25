@@ -7,7 +7,7 @@ import torch.optim as optim
 import torch
 import config
 import torch.nn.functional as F
-from model_3d import UNet3D, CrossAttentionUNet3D, ResUnet3D
+from model_3d import UNet3D, CrossAttentionUNet3D, ResUnet3D, SwinUNETR
 from torch.utils.tensorboard import SummaryWriter
 import os
 from torchvision.utils import save_image, make_grid
@@ -407,23 +407,18 @@ if __name__ == "__main__":
     #update_folds_miccai();
     #cache_dataset_miccai(200);
     #torch.autograd.detect_anomaly() 
-    EXP_NAME = f"BL+DICE_AUGMENTATION-Not PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}-MONAI PRETRAINED";
+    EXP_NAME = f"BL+DICE_AUGMENTATION-Not PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
     RESUME = False;
-    model = UNet3D(
+    model = SwinUNETR(
+        img_size=(96,96,96),
         spatial_dims=3,
         in_channels=1,
         out_channels=1,
-        channels=(16,
-            32,
-            64,
-            128,
-            256),
-        strides=(2, 2, 2, 2),
-        num_res_units=2,
-        norm='batch'
+        feature_size=48
         ).to('cuda')
     
-    model.load_pretrained_monai_unet3d();
+    ckpt = torch.load('pretrained/swin/model_swinvit.pt');
+    model.load_from(ckpt)
     if config.PRETRAINED:
         ckpt = torch.load(config.PRERTRAIN_PATH);
         model.load_state_dict(ckpt['model']);
