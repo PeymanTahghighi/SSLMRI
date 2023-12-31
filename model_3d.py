@@ -324,6 +324,26 @@ class ResUnet3D(nn.Module):
         return out;
 #---------------------------------------------------------------
 
+class AttentionBlock(nn.Module):
+    def __init__(self, feature_size) -> None:
+        super().__init__();
+        self.feature_size = feature_size;
+        self.m1 = nn.Sequential(
+            nn.AdaptiveAvgPool3d(1),
+            nn.Flatten()
+        )
+        self.model = nn.Sequential(
+            nn.Linear(feature_size, feature_size*2),
+            nn.LeakyReLU(0.2),
+            nn.Linear(feature_size*2, feature_size),
+        )
+
+    def forward(self, x):
+        x = self.m1(x);
+        out = x + self.model(x);
+        return torch.sigmoid(out);
+
+
 class UNet3D(nn.Module):
 
     def __init__(
@@ -488,11 +508,7 @@ class UNet3D(nn.Module):
                 feature_size,
                 kernel_size=self.kernel_size,
             )
-        atten = nn.Sequential(
-            nn.AdaptiveAvgPool3d(1),
-
-            nn.Sigmoid()
-        )
+        atten = AttentionBlock(feature_size);
 
         return feature_selection, refinement, atten;
 
@@ -502,6 +518,7 @@ class UNet3D(nn.Module):
         d_selection = self.feature_selection_modules[idx](d);
         d_refine = self.feature_refinement_modules[idx](d_selection);
         d_attn = self.feature_attention_modules[idx](d_refine);
+        d_attn = d_attn.reshape(d_attn.shape[0], d_attn.shape[1], 1,1,1);
         
         d_refine = d_refine * d_attn;
         return F.leaky_relu(d_refine + d_selection, 0.2, inplace=True);
@@ -1004,7 +1021,6 @@ class SwinUNETR(nn.Module):
 
         return feature_selection, refinement, atten;
 
-
     def squeeze_excitation_block(self, inp1, inp2, idx):
         d = torch.concat([inp1, inp2], dim=1);
         d_selection = self.feature_selection_modules[idx](d);
@@ -1100,18 +1116,19 @@ class SwinUNETR(nn.Module):
 
 def test():
 
-    sample = torch.rand((1,1,64,64,64)).to('cuda');
+    sample = torch.rand((2,1,64,64,64)).to('cuda');
 
-    net = SwinUNETR(
-        img_size=(64,64,64),
+    net = UNet3D(
         spatial_dims=3,
         in_channels=1,
         out_channels=1,
-        feature_size=48
+        channels=(64, 128, 256, 512),
+        strides=(2, 2, 2),
+        num_res_units=2,
         ).to('cuda')
     
-    ckpt = torch.load('pretrained/swin/model_swinvit.pt');
-    net.load_from(ckpt)
+    #ckpt = torch.load('pretrained/swin/model_swinvit.pt');
+    #net.load_from(ckpt)
     total_parameters = sum(p.numel() for p in net.parameters() if p.requires_grad);
     print(f'total parameters: {total_parameters}')
     

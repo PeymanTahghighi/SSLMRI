@@ -260,8 +260,8 @@ def train_miccai(model, train_loader, optimizer, scalar):
             curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_distance_transform = distance_transform[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
-            assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap)) or not torch.any(torch.isnan(curr_distance_transform))
-            #with torch.cuda.amp.autocast_mode.autocast():
+            #assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap)) or not torch.any(torch.isnan(curr_distance_transform))
+            with torch.cuda.amp.autocast_mode.autocast():
 
                 # hm1 = model(curr_mri, curr_mri_noisy);
                 # hm2 = model(curr_mri_noisy, curr_mri);
@@ -271,15 +271,15 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
                 # lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
-            hm1 = model(curr_mri, curr_mri_noisy);
-            hm2 = model(curr_mri_noisy, curr_mri);
-            lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
-            lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
+                hm1 = model(curr_mri, curr_mri_noisy);
+                hm2 = model(curr_mri_noisy, curr_mri);
+                lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
+                lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
 
-            lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
-            lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
-            #lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
-            loss = (lhb1 + lhb2 + lhf1 + lhf2);
+                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
+                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
+                lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
+                loss = (lhb1 + lhb2 + lhf1 + lhf2 + lhh);
                 
 
             scalar.scale(loss).backward();
@@ -407,18 +407,17 @@ if __name__ == "__main__":
     #update_folds_miccai();
     #cache_dataset_miccai(200);
     #torch.autograd.detect_anomaly() 
-    EXP_NAME = f"BL+DICE_AUGMENTATION-Not PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
+    EXP_NAME = f"BL+DICE_AUGMENTATION-Not PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}-NEW_ATTENTION2";
     RESUME = False;
-    model = SwinUNETR(
-        img_size=(96,96,96),
+    model = UNet3D(
         spatial_dims=3,
         in_channels=1,
         out_channels=1,
-        feature_size=48
+        channels=(64, 128, 256, 512),
+        strides=(2, 2, 2),
+        num_res_units=2,
         ).to('cuda')
     
-    ckpt = torch.load('pretrained/swin/model_swinvit.pt');
-    model.load_from(ckpt)
     if config.PRETRAINED:
         ckpt = torch.load(config.PRERTRAIN_PATH);
         model.load_state_dict(ckpt['model']);

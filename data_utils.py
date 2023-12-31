@@ -402,7 +402,7 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                 
                 total_heatmap_thresh = torch.where(diff > 0, 0, 1);
                 if config.DEBUG_TRAIN_DATA:
-                    visualize_2d([mrimage_c, noise, mrimage_noisy, heatmap, total_heatmap_thresh], center);
+                    visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, diff], center);
                 
                 
                 mrimage_c = self.transforms(mrimage_c)[0];
@@ -630,7 +630,7 @@ class MICCAI_Dataset(Dataset):
                     total_heatmap = torch.clamp(heatmap+total_heatmap, 0, 1);
 
                 total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
-                total_heatmap_thresh = torch.clamp(total_heatmap_thresh, 0, 1);
+                total_heatmap_thresh = torch.clamp(total_heatmap_thresh + gt_c, 0, 1);
 
                 pos_dt = distance_transform_edt(np.where(total_heatmap_thresh.squeeze().numpy()==1, 0, 1));
                 pos_dt = pos_dt/(np.max(pos_dt)+1e-4);
@@ -648,7 +648,7 @@ class MICCAI_Dataset(Dataset):
                         center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
                     else:
                         center=[mri2_c.shape[1]//2, mri2_c.shape[2]//2, mri2_c.shape[3]//2]
-                    visualize_2d([mri1_c, g,  mri2_c, total_heatmap_thresh, total_heatmap, dt], center);
+                    visualize_2d([mri1_c, mri2_c, total_heatmap_thresh], center);
                 
                 mri1_c = self.transforms(mri1_c);
 
@@ -802,7 +802,7 @@ def get_loader_pretrain_miccai(fold):
 
     mri_dataset_train = MICCAI_PRETRAIN_Dataset(train_mri);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    test_mri = glob(os.path.join('cache_miccai-2016','*.tstd'));
+    test_mri = glob(os.path.join('cache_miccai-2016',f'{fold}','*.tstd'));
     mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
@@ -822,7 +822,7 @@ def get_loader_miccai(fold):
 
     mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
+    mri_dataset_test = MICCAI_Dataset(test_ids[:1], train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
     return train_loader, test_loader, mri_dataset_test; 
@@ -898,7 +898,7 @@ def inpaint_3d(img, mask_g, num_corrupted_patches):
 
     noise = GaussianSmooth(15)(mri);
     mri_after = (1-cube_thresh)*mri + (cube_thresh*noise);
-    #noise = GaussianSmooth(7)(mask_g.float());
+    noise = GaussianSmooth(7)(mask_g.float());
     
     mri_after = torch.clip(mri_after, 0, 1);
     #mri_after = (mri_after*255).astype("uint8")
