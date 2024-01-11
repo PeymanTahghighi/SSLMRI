@@ -1,4 +1,4 @@
-from data_utils import cache_dataset_miccai,cache_miccai21_gradients, get_loader_pretrain_miccai, get_loader, cache_test_dataset, update_folds, update_folds_isbi, visualize_2d, update_folds_miccai, get_loader_miccai
+from data_utils import cache_test_dataset_miccai,cache_mri_gradients, get_loader_pretrain_miccai, get_loader, cache_test_dataset, update_folds, update_folds_isbi, visualize_2d, update_folds_miccai, get_loader_miccai
 from data_utils import predict_on_miccai
 import matplotlib.pyplot as plt
 import numpy as np
@@ -7,7 +7,7 @@ import torch.optim as optim
 import torch
 import config
 import torch.nn.functional as F
-from model_3d import UNet3D, CrossAttentionUNet3D, ResUnet3D, SwinUNETR
+from model_3d import UNet3D, CrossAttentionUNet3D, ResUnet3D
 from torch.utils.tensorboard import SummaryWriter
 import os
 from torchvision.utils import save_image, make_grid
@@ -20,16 +20,7 @@ from monai.losses import GeneralizedDiceFocalLoss, GeneralizedDiceLoss
 from skimage.filters import threshold_otsu
 import seaborn as sns
 from utility import BounraryLoss
-import pickle
-from utility import calculate_metric_percase
 #===============================================================
-
-activation = {}
-def get_activation(name):
-    def hook(model, input, output):
-        activation[name] = output.detach()
-    return hook
-
 def dice_loss(input, 
                 target, 
                 eps=1e-7, 
@@ -242,7 +233,6 @@ def save_examples(model, loader,):
                 break;
 
 def train_miccai(model, train_loader, optimizer, scalar):
-    global activation;
     print(('\n' + '%10s'*3) %('Epoch', 'Loss', 'IoU'));
     pbar = tqdm(enumerate(train_loader), total= len(train_loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     epoch_loss = [];
@@ -260,7 +250,7 @@ def train_miccai(model, train_loader, optimizer, scalar):
             curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_distance_transform = distance_transform[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
-            #assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap)) or not torch.any(torch.isnan(curr_distance_transform))
+            assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
             with torch.cuda.amp.autocast_mode.autocast():
 
                 # hm1 = model(curr_mri, curr_mri_noisy);
@@ -279,8 +269,7 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
                 lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
                 lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
-                loss = (lhb1 + lhb2 + lhf1 + lhf2 + lhh);
-                
+                loss = (lhf1 + lhf2 + lhb1 + lhb2 + lhh)/ config.hyperparameters['virtual_batch_size'];
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
@@ -397,17 +386,15 @@ def log_gradients_in_model(model, logger, step):
             logger.add_histogram(tag + "/grad", value.grad.cpu(), step)
             logger.add_histogram(tag + "/vals", value.cpu(), step)
 
-
-
 if __name__ == "__main__":
     
     #update_folds();
     #update_folds_isbi();
     #cache_mri_gradients();
-    #update_folds_miccai();
-    #cache_dataset_miccai(200);
-    #torch.autograd.detect_anomaly() 
-    EXP_NAME = f"BL+DICE_AUGMENTATION-Not PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}-NEW_ATTENTION2";
+   # update_folds_miccai();
+    #cache_test_dataset_miccai(200,1);
+
+    EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}-RETRAIN";
     RESUME = False;
     model = UNet3D(
         spatial_dims=3,
@@ -417,13 +404,12 @@ if __name__ == "__main__":
         strides=(2, 2, 2),
         num_res_units=2,
         ).to('cuda')
-    
     if config.PRETRAINED:
         ckpt = torch.load(config.PRERTRAIN_PATH);
         model.load_state_dict(ckpt['model']);
     
     if RESUME is True:
-        ckpt = torch.load(ckpt,os.path.join('exp', EXP_NAME, 'resume.ckpt'));
+        ckpt = torch.load('resume.ckpt');
         model.load_state_dict(ckpt['model']);
 
     model.to('cuda');
@@ -473,6 +459,7 @@ if __name__ == "__main__":
                         'best_dice': best_dice,
                         'hp': config.hyperparameters,
                         'log': EXP_NAME}, os.path.join('exp', EXP_NAME, 'best_model.ckpt'));
+
 
 
 

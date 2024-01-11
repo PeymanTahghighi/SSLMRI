@@ -14,6 +14,7 @@ hyperparameters = {
 }
 
 DEBUG_TRAIN_DATA = False;
-PRETRAINED = False
-FOLD = 0;
+PRETRAINED = False;
+USE_ONE_SAMPLE = True;
+FOLD = 2;
 PRERTRAIN_PATH = f'exp/Pretraining MICCAI16/best_model.ckpt';

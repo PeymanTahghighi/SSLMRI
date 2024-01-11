@@ -19,7 +19,7 @@ from patchify import patchify
 import seaborn as sns
 from scipy.ndimage import distance_transform_edt, sobel, histogram, prewitt,laplace, gaussian_filter
 from monai.losses.dice import DiceLoss
-from utility import calculate_metric_percase, remove_small_regions
+from utility import calculate_metric_percase
 
 
 def window_center_adjustment(img):
@@ -54,42 +54,35 @@ def cache_test_dataset(num_data, test_mri, fold):
     return ret;
 
 
-def cache_dataset_miccai(num_data):
-    if os.path.exists(f'cache_miccai-2016') is False:
-        os.makedirs(f'cache_miccai-2016');
+def cache_test_dataset_miccai(num_data, fold):
+    if os.path.exists(f'cache_miccai/{fold}') is False:
+        os.makedirs(f'cache_miccai/{fold}');
     
-    training_centers = ['01', '07', '08'];
-    testing_centers = ['01', '03', '07', '08'];
-    all_mri_path = [];
-    for tc in training_centers:
-        patients = glob(os.path.join('miccai-2016', 'Training', f'Center_{tc}','*/'));
-        for p in patients:
-            all_mri_path.append(os.path.join(p, 'Preprocessed_Data', 'FLAIR_preprocessed.nii.gz'));
+    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
+        train_ids = f.readline().rstrip();
+        train_ids = train_ids.split(',');
+        test_ids = f.readline().rstrip();
+        test_ids = test_ids.split(',');
     
-    for tc in testing_centers:
-        patients = glob(os.path.join('miccai-2016', 'Testing', f'Center_{tc}','*/'));
-        for p in patients:
-            all_mri_path.append(os.path.join(p, 'Preprocessed_Data', 'FLAIR_preprocessed.nii.gz'));
-    
-    #cache_miccai16_gradients(all_mri_path);
-    train_ids, test_ids = train_test_split(all_mri_path, test_size=0.1, shuffle=True, random_state=42);
+    test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
+    mri_paths = [];
+    for t in test_ids:
+        mri_paths.append(os.path.join(t, 'flair_time01_on_middle_space.nii.gz'));
+        mri_paths.append(os.path.join(t, 'flair_time02_on_middle_space.nii.gz'));
 
     
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_ids,cache=True);
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(mri_paths,cache=True);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
 
-    test_ids = [];
     num_data = math.ceil(num_data/len(test_loader));
     counter = 0;
     ret = [];
     for n in tqdm(range(num_data)):
         for (batch) in test_loader:
-            ret.append(os.path.join('cache_miccai-2016', f'{counter}.tstd'))
-            pickle.dump([b.squeeze() for b in batch], open(os.path.join('cache_miccai-2016', f'{counter}.tstd'), 'wb'));
-            test_ids.append(os.path.join('cache_miccai-2016', f'{counter}.tstd'));
+            ret.append(os.path.join('cache_miccai',f'{fold}', f'{counter}.tstd'))
+            pickle.dump([b.squeeze() for b in batch], open(os.path.join('cache_miccai',f'{fold}', f'{counter}.tstd'), 'wb'));
             counter += 1;
 
-    pickle.dump([train_ids, test_ids], open(os.path.join('cache_miccai-2016', 'train_test_split.dmp'), 'wb'));
     return ret;
 
 class MRI_Dataset(Dataset):
@@ -292,8 +285,8 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
         self.augment_noisy_image = OneOf([
             RandGaussianSmooth(prob=1.0, sigma_x=(m1,m2), sigma_y=(m1,m2), sigma_z=(m1,m2)),
             RandGaussianNoise(prob=1.0,std=0.05),
-            RandGibbsNoise(prob=1.0, alpha=(0.65,0.75))
-        ], weights=[1,1,1])
+           # RandGibbsNoise(prob=1.0, alpha=(0.65,0.75))
+        ], weights=[1,1])
 
 
         self.transforms = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
@@ -576,10 +569,13 @@ class MICCAI_Dataset(Dataset):
             hist = np.cumsum(hist);
             t = np.where(hist<0.5)[0][-1];
             t = t/255;
-  
+
+            
+
             mri1 = mri1 / (np.max(mri1)+1e-4);
             mri2 = mri2 / (np.max(mri2)+1e-4);
             
+
             if config.hyperparameters['deterministic'] is False:
                 if np.sum(gt) != 0:
                     ret_transforms = cropper(mri1, 
@@ -700,8 +696,7 @@ class MICCAI_Dataset(Dataset):
             if simple is True:
                 dice = calculate_metric_percase(self.pred_data[k].squeeze(), self.gt_data[k].squeeze(), simple=simple);
             else:
-                pred  = remove_small_regions(self.pred_data[k].squeeze());
-                dice,hd,f1 = calculate_metric_percase(pred, self.gt_data[k].squeeze(), simple=simple);
+                dice,hd,f1 = calculate_metric_percase(self.pred_data[k].squeeze(), self.gt_data[k].squeeze(), simple=simple);
             if np.sum(self.gt_data[k].squeeze()) > 0:
                 ret.append(dice if simple is True else [dice, hd, f1]);
         return np.mean(ret) if simple is True else np.mean(np.array(ret), axis =0);
@@ -785,24 +780,24 @@ def get_loader(fold):
 
 def get_loader_pretrain_miccai(fold):
     
-    train_mri, test_mri = pickle.load(open(os.path.join('cache_miccai-2016', f'train_test_split.dmp'), 'rb'));
+    train_mri, test_mri = pickle.load(open(f'cache_miccai/{fold}.fold', 'rb'));
 
-    # with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
-    #     train_ids = f.readline().rstrip();
-    #     train_ids = train_ids.split(',');
-    #     test_ids = f.readline().rstrip();
-    #     test_ids = test_ids.split(',');
-    # train_ids =  [os.path.join('miccai-processed', t) for t in train_ids];
-    # test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
+    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
+        train_ids = f.readline().rstrip();
+        train_ids = train_ids.split(',');
+        test_ids = f.readline().rstrip();
+        test_ids = test_ids.split(',');
+    train_ids =  [os.path.join('miccai-processed', t) for t in train_ids];
+    test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
     
-    # mri_paths = [];
-    # for t in train_ids:
-    #     mri_paths.append(os.path.join(t, 'flair_time01_on_middle_space.nii.gz'));
-    #     mri_paths.append(os.path.join(t, 'flair_time02_on_middle_space.nii.gz'));
+    mri_paths = [];
+    for t in train_ids:
+        mri_paths.append(os.path.join(t, 'flair_time01_on_middle_space.nii.gz'));
+        mri_paths.append(os.path.join(t, 'flair_time02_on_middle_space.nii.gz'));
 
-    mri_dataset_train = MICCAI_PRETRAIN_Dataset(train_mri);
+    mri_dataset_train = MICCAI_PRETRAIN_Dataset(mri_paths);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    test_mri = glob(os.path.join('cache_miccai-2016',f'{fold}','*.tstd'));
+    test_mri = glob(os.path.join('cache_miccai',f'{fold}','*.tstd'));
     mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
@@ -822,7 +817,7 @@ def get_loader_miccai(fold):
 
     mri_dataset_train = MICCAI_Dataset(train_ids, train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    mri_dataset_test = MICCAI_Dataset(test_ids[:1], train=False);
+    mri_dataset_test = MICCAI_Dataset(test_ids, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
     return train_loader, test_loader, mri_dataset_test; 
@@ -957,10 +952,8 @@ def add_synthetic_lesion_wm(img, mask_g):
     #visualize_2d(mri_after, cube_thresh, slice=center[0:]);
     return mri_after, cube;
 
-def cache_miccai21_gradients():
-    
+def cache_mri_gradients():
     patient_ids = glob(os.path.join('miccai-processed/*/'));
-    
     for p in tqdm(patient_ids):
         patient_path = os.path.join(p, 'flair_time01_on_middle_space.nii.gz');
 
@@ -985,21 +978,6 @@ def cache_miccai21_gradients():
         g = sobel(mrimage);
         g = g < threshold_otsu(g);
         pickle.dump(g, open(os.path.join(p, f'flair_time02_on_middle_space.gradient'), 'wb'));
-
-def cache_miccai16_gradients(patient_paths):
-    
-    for p in tqdm(patient_paths):
-        
-        base_path = p[:p.rfind('\\')];
-        file_name = os.path.basename(p);
-        file_name = file_name[:file_name.find('.')];
-        mrimage = nib.load(p)
-        mrimage = mrimage.get_fdata()
-        mrimage = window_center_adjustment(mrimage);
-        mrimage = mrimage / np.max(mrimage);
-        g = sobel(mrimage);
-        g = g < threshold_otsu(g);
-        pickle.dump(g, open(os.path.join(base_path, f'{file_name}.gradient'), 'wb'));
 
 
 def gradient(mri):
