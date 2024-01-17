@@ -285,8 +285,8 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
         self.augment_noisy_image = OneOf([
             RandGaussianSmooth(prob=1.0, sigma_x=(m1,m2), sigma_y=(m1,m2), sigma_z=(m1,m2)),
             RandGaussianNoise(prob=1.0,std=0.05),
-           # RandGibbsNoise(prob=1.0, alpha=(0.65,0.75))
-        ], weights=[1,1])
+            RandGibbsNoise(prob=1.0, alpha=(0.65,0.75))
+        ], weights=[1,1,1])
 
 
         self.transforms = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
@@ -336,9 +336,9 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
             mrimage = mrimage / (np.max(mrimage)+1e-4);
 
            # gr = sobel(mrimage);
-            g = (mrimage > 0.9) * gr;
-            g = binary_opening(g.squeeze(), structure=np.ones((2,2,2))).astype(g.dtype)
-            g = torch.from_numpy(np.expand_dims(g, axis=0));
+            g = (mrimage > 0.9);
+            #g = binary_opening(g.squeeze(), structure=np.ones((2,2,2))).astype(g.dtype)
+            g = torch.from_numpy(g);
             #g = g < threshold_otsu(g);
            # g = np.expand_dims(gr, axis=0);
             
@@ -364,7 +364,7 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                     mrimage_noisy = copy(mrimage_c);
                     mrimage_c = torch.from_numpy(mrimage_c);
                     mrimage_noisy = torch.from_numpy(mrimage_noisy);
-                    g_c = torch.from_numpy(g_c);
+                    
                     mask_c = torch.from_numpy(mask_c);
 
                 total_heatmap = torch.zeros_like(mrimage_noisy, dtype=torch.float64);
@@ -382,7 +382,7 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                 #pos_cords = np.where(total_heatmap_thresh == 1);
                 #r = np.random.randint(0,len(pos_cords[0]));
                 #center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
-                total_heatmap_thresh = torch.where(total_heatmap > 0.8, 1.0, 0.0);
+                total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
                 part_first = mrimage_c * total_heatmap_thresh;
                 part_second = mrimage_noisy * total_heatmap_thresh;
                 if config.hyperparameters['deterministic'] is True:
@@ -390,16 +390,17 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                 else:
                     mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
 
-                diff = torch.abs(part_first - part_second) > 0.2;
+                diff = torch.abs(part_first - part_second) > (0.2);
 
                 
                 total_heatmap_thresh = torch.where(diff > 0, 0, 1);
-                if config.DEBUG_TRAIN_DATA:
-                    visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, diff], center);
                 
+                if config.DEBUG_TRAIN_DATA:
+                    visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, diff, g_c], center);
                 
                 mrimage_c = self.transforms(mrimage_c)[0];
                 mrimage_noisy = self.transforms(mrimage_noisy)[0];
+
 
                 if ret_mrimage is None:
                     ret_mrimage = mrimage_c.unsqueeze(dim=0);

@@ -31,7 +31,7 @@ from monai.losses.dice import DiceLoss, DiceFocalLoss
 from utility import calculate_metric_percase
 from scipy.ndimage import distance_transform_edt, sobel, histogram, prewitt,laplace, gaussian_filter
 from scipy.ndimage import convolve, binary_erosion, binary_opening
-from data_utils import inpaint_3d
+from data_utils import inpaint_3d, add_synthetic_lesion_wm
 from monai.transforms import Compose, Resize, SpatialPadd, ScaleIntensityRange, Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise, RandSpatialCropSamplesd
 
 
@@ -250,7 +250,7 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
     
     if use_cached is False:
         augment_noisy_image = OneOf([
-            RandGibbsNoise(prob=1.0, alpha=(0.75,0.85))
+            RandGibbsNoise(prob=1.0, alpha=(0.15,0.25))
         ], weights=[1])
 
         normalize_internsity = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
@@ -266,6 +266,19 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
 
             first_mri_nib = nib.load(first_mri_path)
             second_mri_nib = nib.load(second_mri_path)
+            patient_number = first_mri_path[:first_mri_path.rfind('\\')];
+            patient_number = patient_number[patient_number.rfind('\\')+1:];
+
+            gt = nib.load(os.path.join('miccai-processed',patient_number,f'ground_truth.nii.gz'));
+            gt = gt.get_fdata();
+
+            brainmask = nib.load(os.path.join('miccai-processed',patient_number, f'brain_mask.nii.gz'));
+            brainmask = brainmask.get_fdata();
+
+            gt = gt * brainmask;
+
+            s = np.sum(gt);
+            
 
             first_mri_data = first_mri_nib.get_fdata()
             second_mri_data = second_mri_nib.get_fdata()
@@ -273,20 +286,48 @@ def predict_on_mri_3d(first_mri_path, second_mri_path, model, use_cached = False
             first_mri_data = window_center_adjustment(first_mri_data);
             second_mri_data = window_center_adjustment(second_mri_data);
 
+            hist = np.histogram(second_mri_data.ravel(), bins = int(np.max(second_mri_data)))[0];
+            hist = hist[1:]
+            hist = hist / (hist.sum()+1e-4);
+            hist = np.cumsum(hist);
+            t = np.where(hist<0.5)[0][-1];
+            t = t/255;
+
             first_mri_data, first_mri_data_mask = preprocess(first_mri_data);
             second_mri_data, rigid_registered_image_data_mask = preprocess(second_mri_data);
 
-            gr = sobel(second_mri_data);
-            gr = gr < threshold_otsu(gr);
+           # gr = sobel(second_mri_data);
+           # gr = gr < threshold_otsu(gr);
 
-            g = (second_mri_data > 0.9) * gr;
-            g = binary_opening(g.squeeze(), structure=np.ones((2,2,2))).astype(g.dtype)
-            g = torch.from_numpy(np.expand_dims(g, axis=0));
+            mask = second_mri_data > threshold_otsu(second_mri_data); 
 
-            second_mri_data, heatmap, noise, center = inpaint_3d(torch.from_numpy(second_mri_data), g, 40)
-            print(center)
+            
+            g_inpaint = (second_mri_data > 0.9);
+            #g = binary_opening(g.squeeze(), structure=np.ones((2,2,2))).astype(g.dtype)
+            g_inpaint = torch.from_numpy(g_inpaint);
 
-            second_mri_data = augment_noisy_image(second_mri_data);
+            t1 =  torch.where(torch.from_numpy(second_mri_data)>t, 0, 1);
+            t2 = (second_mri_data > threshold_otsu(second_mri_data));
+            g = t1 * t2
+            g = g.numpy();
+
+           # g = binary_opening(g.squeeze(), structure=np.ones((3,3,3))).astype(g.dtype)
+            g = torch.from_numpy(g);
+
+            total_heatmap = torch.zeros_like(torch.from_numpy(second_mri_data), dtype=torch.float64);
+
+            num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
+            for _ in range(40):
+                second_mri_data, heatmap = add_synthetic_lesion_wm(second_mri_data, g)
+                total_heatmap = torch.clamp(heatmap+total_heatmap, 0, 1);
+            
+            pos_cords = np.where(total_heatmap>0);
+            #print(pos_cords[1:]);
+            second_mri_data, heatmap, noise, center = inpaint_3d(torch.from_numpy(second_mri_data), g_inpaint, 40)
+            first_mri_data = first_mri_data * mask;
+            second_mri_data = second_mri_data * mask;
+
+            #second_mri_data = augment_noisy_image(second_mri_data);
 
             first_mri_data = normalize_internsity(first_mri_data)[0];
             second_mri_data = normalize_internsity(second_mri_data)[0];
@@ -866,7 +907,7 @@ if __name__ == "__main__":
             );
     segmentation = True;
     if segmentation is True:
-        exp_name = 'BL+DICE_AUGMENTATION-PRETRAINEDMICCAI16-BL=10';
+        exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-BL=10';
         
         for f in range(2,5):
             ckpt = torch.load(os.path.join('exp', f'{exp_name}-F{f}',  'best_model.ckpt'));
@@ -896,8 +937,8 @@ if __name__ == "__main__":
         model.load_state_dict(ckpt['model']);
         model.to('cuda');
         model.eval();
-        predict_on_mri_3d('miccai-processed\\015\\flair_time01_on_middle_space.nii.gz',
-                        'miccai-processed\\015\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
+        predict_on_mri_3d('miccai-processed\\020\\flair_time01_on_middle_space.nii.gz',
+                        'miccai-processed\\020\\flair_time02_on_middle_space.nii.gz', model, use_cached=False);
     
     # with open(os.path.join('cache_miccai', f'fold{4}.txt'), 'r') as f:
     #     train_ids = f.readline().rstrip();

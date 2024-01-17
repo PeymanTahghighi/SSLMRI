@@ -11,6 +11,7 @@ from monai.networks.blocks.convolutions import Convolution, ResidualUnit
 from monai.networks.layers.factories import Act
 from typing import Optional, Sequence, Tuple, Union
 import warnings
+import numpy as np
 #===============================================================
 #===============================================================
 
@@ -170,6 +171,25 @@ class Upblock(nn.Module):
         out = self.conv2(ct);
         return out;
 #---------------------------------------------------------------
+
+class AttentionBlock(nn.Module):
+    def __init__(self, feature_size) -> None:
+        super().__init__();
+        self.feature_size = feature_size;
+        self.m1 = nn.Sequential(
+            nn.AdaptiveAvgPool3d(1),
+            nn.Flatten()
+        )
+        self.model = nn.Sequential(
+            nn.Linear(feature_size, feature_size*2),
+            nn.LeakyReLU(0.2),
+            nn.Linear(feature_size*2, feature_size),
+        )
+
+    def forward(self, x):
+        x = self.m1(x);
+        out = x + self.model(x);
+        return torch.sigmoid(out);
 
 #---------------------------------------------------------------
 class CrossAttention(nn.Module):
@@ -526,6 +546,272 @@ class UNet3D(nn.Module):
         return out;
 #---------------------------------------------------------------
 
+class AttentionBlock(nn.Module):
+    def __init__(self, feature_size) -> None:
+        super().__init__();
+        self.feature_size = feature_size;
+        self.m1 = nn.Sequential(
+            nn.AdaptiveAvgPool3d(1),
+            nn.Flatten()
+        )
+        self.model = nn.Sequential(
+            nn.Linear(feature_size, feature_size*2),
+            nn.LeakyReLU(0.2),
+            nn.Linear(feature_size*2, feature_size),
+        )
+
+    def forward(self, x):
+        x = self.m1(x);
+        out = x + self.model(x);
+        return torch.sigmoid(out);
+
+class UNet3DSSL(nn.Module):
+
+    def __init__(
+        self,
+        spatial_dims: int,
+        in_channels: int,
+        out_channels: int,
+        channels: Sequence[int],
+        strides: Sequence[int],
+        kernel_size: Union[Sequence[int], int] = 3,
+        up_kernel_size: Union[Sequence[int], int] = 3,
+        num_res_units: int = 0,
+        act: Union[Tuple, str] = "PRELU",
+        norm: Union[Tuple, str] = "BATCH",
+        dropout: float = 0.0,
+        bias: bool = True,
+        adn_ordering: str = "NDA",
+        dimensions: Optional[int] = None,
+    ) -> None:
+
+        super().__init__()
+
+        if len(channels) < 2:
+            raise ValueError("the length of `channels` should be no less than 2.")
+        delta = len(strides) - (len(channels) - 1)
+        if delta < 0:
+            raise ValueError("the length of `strides` should equal to `len(channels) - 1`.")
+        if delta > 0:
+            warnings.warn(f"`len(strides) > len(channels) - 1`, the last {delta} values of strides will not be used.")
+        if dimensions is not None:
+            spatial_dims = dimensions
+        if isinstance(kernel_size, Sequence):
+            if len(kernel_size) != spatial_dims:
+                raise ValueError("the length of `kernel_size` should equal to `dimensions`.")
+        if isinstance(up_kernel_size, Sequence):
+            if len(up_kernel_size) != spatial_dims:
+                raise ValueError("the length of `up_kernel_size` should equal to `dimensions`.")
+
+        self.dimensions = spatial_dims
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.channels = channels
+        self.strides = strides
+        self.kernel_size = kernel_size
+        self.up_kernel_size = up_kernel_size
+        self.num_res_units = num_res_units
+        self.act = act
+        self.norm = norm
+        self.dropout = dropout
+        self.bias = bias
+        self.adn_ordering = adn_ordering
+
+        self.down_layers = nn.ModuleList();
+
+        c = in_channels;
+        for idx in range(len(channels)):
+            self.down_layers.append(self._get_down_layer(c, channels[idx], 2 if idx != len(channels)-1 else 1, True if idx == 0 else False))
+            c = channels[idx];
+        
+        c = channels[-1] + channels[-2];
+        rev_channels = list(reversed(channels))
+        
+
+        self.upsample1 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(rev_channels[0], rev_channels[0], kernel_size=3, padding=1),
+            nn.InstanceNorm3d(rev_channels[0]),
+            nn.LeakyReLU(),
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(rev_channels[0], rev_channels[0], kernel_size=3, padding=1),
+            nn.InstanceNorm3d(rev_channels[0]),
+            nn.LeakyReLU(),
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(rev_channels[0], rev_channels[0], kernel_size=3, padding=1),
+            nn.InstanceNorm3d(rev_channels[0]),
+            nn.LeakyReLU(),
+        )
+
+        self.upsample2 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(rev_channels[1], rev_channels[1], kernel_size=3, padding=1),
+            nn.InstanceNorm3d(rev_channels[1]),
+            nn.LeakyReLU(),
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(rev_channels[1], rev_channels[1], kernel_size=3, padding=1),
+            nn.InstanceNorm3d(rev_channels[1]),
+            nn.LeakyReLU(),
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(rev_channels[1], rev_channels[1], kernel_size=3, padding=1),
+            nn.InstanceNorm3d(rev_channels[1]),
+            nn.LeakyReLU(),
+        )
+
+        self.upsample3 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(rev_channels[2], rev_channels[2], kernel_size=3, padding=1),
+            nn.InstanceNorm3d(rev_channels[2]),
+            nn.LeakyReLU(),
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(rev_channels[2], rev_channels[2], kernel_size=3, padding=1),
+            nn.InstanceNorm3d(rev_channels[2]),
+            nn.LeakyReLU(),
+        )
+
+        self.upsample4 = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='trilinear', align_corners=False),
+            nn.Conv3d(rev_channels[3], rev_channels[3], kernel_size=3, padding=1),
+            nn.InstanceNorm3d(rev_channels[3]),
+            nn.LeakyReLU(),
+        )
+
+
+        self.feature_selection_modules = nn.ModuleList();
+        self.feature_refinement_modules = nn.ModuleList();
+        self.feature_attention_modules = nn.ModuleList();
+
+        for f in rev_channels:
+            layers = self._make_squeeze_excitation(f);
+            self.feature_selection_modules.append(layers[0]);
+            self.feature_refinement_modules.append(layers[1]);
+            self.feature_attention_modules.append(layers[2]);
+
+        self.final = nn.Sequential(
+            nn.Conv3d(np.sum(channels), 1, 1, 1, bias=False, padding=0),
+        )
+
+        self._init_weights();
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv3d):
+                m.weight = nn.init.kaiming_normal_(m.weight);
+            elif isinstance(m, nn.BatchNorm3d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+    def _get_down_layer(self, in_channels: int, out_channels: int, strides: int, is_top: bool) -> nn.Module:
+        """
+        Returns the encoding (down) part of a layer of the network. This typically will downsample data at some point
+        in its structure. Its output is used as input to the next layer down and is concatenated with output from the
+        next layer to form the input for the decode (up) part of the layer.
+
+        Args:
+            in_channels: number of input channels.
+            out_channels: number of output channels.
+            strides: convolution stride.
+            is_top: True if this is the top block.
+        """
+        mod: nn.Module
+        if self.num_res_units > 0:
+
+            mod = ResidualUnit(
+                self.dimensions,
+                in_channels,
+                out_channels,
+                strides=strides,
+                kernel_size=self.kernel_size,
+                subunits=self.num_res_units,
+                act=self.act,
+                norm=self.norm,
+                dropout=self.dropout,
+                bias=self.bias,
+                adn_ordering=self.adn_ordering,
+            )
+            return mod
+        mod = Convolution(
+            self.dimensions,
+            in_channels,
+            out_channels,
+            strides=strides,
+            kernel_size=self.kernel_size,
+            act=self.act,
+            norm=self.norm,
+            dropout=self.dropout,
+            bias=self.bias,
+            adn_ordering=self.adn_ordering,
+        )
+        return mod
+    
+    def _make_squeeze_excitation(self, feature_size):
+        feature_selection = nn.Sequential(
+            ConvBlock(feature_size*2, feature_size, 1, 1, act=False),
+        )
+        refinement = ResConvBlock(
+                feature_size,
+                feature_size,
+                kernel_size=self.kernel_size,
+            )
+        atten = nn.Sequential(
+            nn.AdaptiveAvgPool3d(1),
+            nn.Sigmoid()
+        )
+
+        return feature_selection, refinement, atten;
+
+
+    def squeeze_excitation_block(self, inp1, inp2, idx):
+        d = torch.concat([inp1, inp2], dim=1);
+        d_selection = self.feature_selection_modules[idx](d);
+        d_refine = self.feature_refinement_modules[idx](d_selection);
+        d_attn = self.feature_attention_modules[idx](d_refine);
+        d_refine = d_refine * d_attn;
+        return F.leaky_relu(d_refine + d_selection, 0.2, inplace=True);
+
+    def _down_path(self, x:torch.Tensor):
+        outputs = [];
+        out =  x;
+        for l in self.down_layers:
+            out = l(out);
+            outputs.append(out);
+
+        return list(reversed(outputs));
+
+    def forward(self, x1: torch.Tensor, x2: torch.Tensor) -> torch.Tensor:
+        inp1_outputs = self._down_path(x1);
+        inp2_outputs = self._down_path(x2);
+
+        merged = [];
+        for i in range(len(self.down_layers)):
+            merged.append(self.squeeze_excitation_block(inp1_outputs[i], inp2_outputs[i], i));
+
+   
+        up1 = self.upsample1(merged[0]);
+        up2 = self.upsample2(merged[1]);
+        up3 = self.upsample3(merged[2]);
+        up4 = self.upsample4(merged[3]);
+        merged = torch.concat([up1, up2, up3, up4], dim = 1);
+        
+        out = self.final(merged);
+
+        return out;
+
+    def load_pretrained_monai_unet3d(self):
+        ckpt = torch.load('pretrained/spleen_ct_segmentation/model.pt');
+
+        sdn = self.state_dict()
+
+        sdn_keys = list(sdn.keys());
+        sdm_keys = list(ckpt.keys());
+        n = np.zeros((5,5));
+        
+        for i in range(len(sdm_keys)):
+            k = sdn_keys[i]
+            if sdn[k].shape ==  ckpt[sdm_keys[i]].shape:
+                sdn[k] = ckpt[sdm_keys[i]];
+                print(k);
+        self.load_state_dict(sdn, strict=False);
+#---------------------------------------------------------------
 
 class CrossAttentionUNet3D(nn.Module):
 
