@@ -20,6 +20,7 @@ from monai.losses import GeneralizedDiceFocalLoss, GeneralizedDiceLoss
 from skimage.filters import threshold_otsu
 import seaborn as sns
 from utility import BounraryLoss
+from VNet import VNet
 #===============================================================
 def dice_loss(input, 
                 target, 
@@ -250,6 +251,10 @@ def train_miccai(model, train_loader, optimizer, scalar):
             curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_distance_transform = distance_transform[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
+            
+            volume_batch1 = torch.cat([curr_mri, curr_mri_noisy, curr_mri - curr_mri_noisy], dim=1)
+            volume_batch2 = torch.cat([curr_mri_noisy, curr_mri, curr_mri_noisy - curr_mri], dim=1)
+
             assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
             with torch.cuda.amp.autocast_mode.autocast():
 
@@ -261,8 +266,9 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 # lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
                 # lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
                 # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
-                hm1 = model(curr_mri, curr_mri_noisy);
-                hm2 = model(curr_mri_noisy, curr_mri);
+                
+                hm1 = model(volume_batch1);
+                hm2 = model(volume_batch2);
                 lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
                 lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
 
@@ -347,8 +353,10 @@ def valid_miccai(model, loader, dataset):
         for idx, (batch) in pbar:
             mri, mri_noisy, heatmap, brainmask, patient_id, loc = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].to('cuda'), batch[4], batch[5];
 
-            hm1 = model(mri, mri_noisy);
-            hm2 = model(mri_noisy, mri);
+            volume_batch1 = torch.cat([mri, mri_noisy, mri - mri_noisy], dim=1)
+            volume_batch2 = torch.cat([mri_noisy, mri, mri_noisy - mri], dim=1)
+            hm1 = model(volume_batch1);
+            hm2 = model(volume_batch2);
             pred_lbl_1 = torch.sigmoid(hm1)>0.5;
             pred_lbl_2 = torch.sigmoid(hm2)>0.5;
             pred = pred_lbl_1 * pred_lbl_2 * brainmask;
@@ -396,14 +404,15 @@ if __name__ == "__main__":
 
     EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}-RETRAIN";
     RESUME = False;
-    model = UNet3D(
-        spatial_dims=3,
-        in_channels=1,
-        out_channels=1,
-        channels=(64, 128, 256, 512),
-        strides=(2, 2, 2),
-        num_res_units=2,
-        ).to('cuda')
+    model = VNet(n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+    # model = UNet3D(
+    #     spatial_dims=3,
+    #     in_channels=1,
+    #     out_channels=1,
+    #     channels=(64, 128, 256, 512),
+    #     strides=(2, 2, 2),
+    #     num_res_units=2,
+    #     ).to('cuda')
     if config.PRETRAINED:
         ckpt = torch.load(config.PRERTRAIN_PATH);
         model.load_state_dict(ckpt['model']);
