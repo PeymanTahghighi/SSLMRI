@@ -70,7 +70,7 @@ def train(model, train_loader, optimizer, scalar):
             curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
             assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
-            with torch.cuda.amp.autocast_mode.autocast():
+            with torch.cuda.amp.autocast():
                 hm1 = model(curr_mri, curr_mri_noisy);
                 hm2 = model(curr_mri_noisy, curr_mri);
                 lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
