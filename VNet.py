@@ -7,11 +7,8 @@ class ConvBlock(nn.Module):
         super(ConvBlock, self).__init__()
 
         ops = []
+        input_channel = n_filters_in
         for i in range(n_stages):
-            if i==0:
-                input_channel = n_filters_in
-            else:
-                input_channel = n_filters_out
 
             ops.append(nn.Conv3d(input_channel, n_filters_out, 3, padding=1))
             if normalization == 'batchnorm':
@@ -23,6 +20,7 @@ class ConvBlock(nn.Module):
             elif normalization != 'none':
                 assert False
             ops.append(nn.ReLU(inplace=True))
+            input_channel = n_filters_out
 
         self.conv = nn.Sequential(*ops)
 
@@ -36,11 +34,9 @@ class ResidualConvBlock(nn.Module):
         super(ResidualConvBlock, self).__init__()
 
         ops = []
+        input_channel = n_filters_in
         for i in range(n_stages):
-            if i == 0:
-                input_channel = n_filters_in
-            else:
-                input_channel = n_filters_out
+            
 
             ops.append(nn.Conv3d(input_channel, n_filters_out, 3, padding=1))
             if normalization == 'batchnorm':
@@ -54,6 +50,8 @@ class ResidualConvBlock(nn.Module):
 
             if i != n_stages-1:
                 ops.append(nn.ReLU(inplace=True))
+
+            input_channel = n_filters_out
 
         self.conv = nn.Sequential(*ops)
         self.relu = nn.ReLU(inplace=True)
@@ -91,15 +89,15 @@ class DownsamplingConvBlock(nn.Module):
         return x
 
 
-class Upsampling_function(nn.Module):
+class UpSampling(nn.Module):
     def __init__(self, n_filters_in, n_filters_out, stride=2, normalization='none', mode_upsampling = 1):
-        super(Upsampling_function, self).__init__()
+        super(UpSampling, self).__init__()
 
         ops = []
         if mode_upsampling == 0:
             ops.append(nn.ConvTranspose3d(n_filters_in, n_filters_out, stride, padding=0, stride=stride))
         if mode_upsampling == 1:
-            ops.append(nn.Upsample(scale_factor=stride, mode="trilinear", align_corners=True))
+            ops.append(nn.Upsample(scale_factor=stride, mode="trilinear", align_corners=False))
             ops.append(nn.Conv3d(n_filters_in, n_filters_out, kernel_size=3, padding=1))
         elif mode_upsampling == 2:
             ops.append(nn.Upsample(scale_factor=stride, mode="nearest"))
@@ -172,16 +170,16 @@ class Decoder(nn.Module):
 
         convBlock = ConvBlock if not has_residual else ResidualConvBlock
 
-        self.block_five_up = Upsampling_function(n_filters * 16, n_filters * 8, normalization=normalization, mode_upsampling=up_type)
+        self.block_five_up = UpSampling(n_filters * 16, n_filters * 8, normalization=normalization, mode_upsampling=up_type)
 
         self.block_six = convBlock(3, n_filters * 8, n_filters * 8, normalization=normalization)
-        self.block_six_up = Upsampling_function(n_filters * 8, n_filters * 4, normalization=normalization, mode_upsampling=up_type)
+        self.block_six_up = UpSampling(n_filters * 8, n_filters * 4, normalization=normalization, mode_upsampling=up_type)
 
         self.block_seven = convBlock(3, n_filters * 4, n_filters * 4, normalization=normalization)
-        self.block_seven_up = Upsampling_function(n_filters * 4, n_filters * 2, normalization=normalization, mode_upsampling=up_type)
+        self.block_seven_up = UpSampling(n_filters * 4, n_filters * 2, normalization=normalization, mode_upsampling=up_type)
 
         self.block_eight = convBlock(2, n_filters * 2, n_filters * 2, normalization=normalization)
-        self.block_eight_up = Upsampling_function(n_filters * 2, n_filters, normalization=normalization, mode_upsampling=up_type)
+        self.block_eight_up = UpSampling(n_filters * 2, n_filters, normalization=normalization, mode_upsampling=up_type)
 
         self.block_nine_1 = convBlock(1, n_filters, n_filters, normalization=normalization)
         self.block_nine_2 = convBlock(1, n_filters, n_filters, normalization=normalization)
@@ -231,25 +229,69 @@ class Decoder(nn.Module):
         out_seg_3 = self.out_conv_3(out_seg_3)
         
         return out_seg_3
- 
+    
+class SSLHead(nn.Module):
+    def __init__(self, n_fiters) -> None:
+        super().__init__();
+        self.first_upsample = nn.Sequential(
+            UpSampling(n_fiters*16, n_fiters*8, normalization='instancenorm'),
+            UpSampling(n_fiters*8, n_fiters*4, normalization='instancenorm'),
+            UpSampling(n_fiters*4, n_fiters*2, normalization='instancenorm'),
+            UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
+        )
+
+        self.second_upsample = nn.Sequential(
+            UpSampling(n_fiters*8, n_fiters*4, normalization='instancenorm'),
+            UpSampling(n_fiters*4, n_fiters*2, normalization='instancenorm'),
+            UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
+        )
+
+        self.third_upsample = nn.Sequential(
+            UpSampling(n_fiters*4, n_fiters*2, normalization='instancenorm'),
+            UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
+        )
+
+        self.fourth_upsample = nn.Sequential(
+            UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
+        )
+
+        self.final_conv = nn.Conv3d(16, 1, 3, 1, 1);
+    
+    def forward(self, x):
+        u1 = self.first_upsample(x[-1]);
+        u2 = self.second_upsample(x[-2]);
+        u3 = self.third_upsample(x[-3]);
+        u4 = self.fourth_upsample(x[-4]);
+        out = self.final_conv(u1+u2+u3+u4);
+        return out;
+        
 class VNet(nn.Module):
-    def __init__(self, n_channels=3, n_classes=2, n_filters=16, normalization='none', has_dropout=False, has_residual=False):
+    def __init__(self, model_type, n_channels=3, n_classes=2, n_filters=16, normalization='none', has_dropout=False, has_residual=False):
         super(VNet, self).__init__()
 
         self.encoder = Encoder(n_channels, n_classes, n_filters, normalization, has_dropout, has_residual)
-        self.decoder = Decoder(n_channels, n_classes, n_filters, normalization, has_dropout, has_residual, 0)
+        self.modle_type = model_type;
+
+        if model_type == 'segmentation':
+            self.decoder = Decoder(n_channels, n_classes, n_filters, normalization, has_dropout, has_residual, 0)
+        else:
+            self.ssl_head = SSLHead(n_filters);
     
     def forward(self, input):
         features = self.encoder(input)
-        out_seg_3 = self.decoder(features)
-        return out_seg_3
+        if self.modle_type == 'segmentation':
+            out_seg_3 = self.decoder(features)
+            return out_seg_3
+        out = self.ssl_head(features);
+        return out;
+    
 
 if __name__ == '__main__':
     # compute FLOPS & PARAMETERS
     from ptflops import get_model_complexity_info
-    model = VNet(n_channels=3, n_classes=2, normalization='batchnorm', has_dropout=True)
+    model = VNet(model_type='pretraining', n_channels=3, n_classes=2, normalization='batchnorm', has_dropout=True)
     with torch.cuda.device(0):
-      macs, params = get_model_complexity_info(model, (3, 80, 80, 80), as_strings=True,
+      macs, params = get_model_complexity_info(model, (3, 96, 96, 96), as_strings=True,
                                                print_per_layer_stat=True, verbose=True)
       print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
       print('{:<30}  {:<8}'.format('Number of parameters: ', params))

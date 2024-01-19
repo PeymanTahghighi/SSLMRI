@@ -183,8 +183,10 @@ def save_examples(model, loader,):
         counter = 0;
         for idx, (batch) in pbar:
             mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=0), batch[1].to('cuda').unsqueeze(dim=0), batch[2].to('cuda');
-            hm1 = model(mri, mri_noisy);
-            hm2 = model(mri_noisy, mri);            
+            volume_batch1 = torch.cat([mri, mri_noisy, mri - mri_noisy], dim=1)
+            volume_batch2 = torch.cat([mri_noisy, mri, mri_noisy - mri], dim=1)
+            hm1 = model(volume_batch1);
+            hm2 = model(volume_batch2);            
             mri_recon = (mri_noisy+hm2);
             mri_noisy_recon = (mri+hm1);
 
@@ -258,15 +260,6 @@ def train_miccai(model, train_loader, optimizer, scalar):
             assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
             with torch.cuda.amp.autocast_mode.autocast():
 
-                # hm1 = model(curr_mri, curr_mri_noisy);
-                # hm2 = model(curr_mri_noisy, curr_mri);
-                # lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
-                # lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
-                # lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
-                # lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
-                # lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
-                # loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
-                
                 hm1 = model(volume_batch1);
                 hm2 = model(volume_batch2);
                 lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
@@ -315,10 +308,13 @@ def train_miccai_pretrain(model, train_loader, optimizer, scalar):
             curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
             curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
 
+            volume_batch1 = torch.cat([curr_mri, curr_mri_noisy, curr_mri - curr_mri_noisy], dim=1)
+            volume_batch2 = torch.cat([curr_mri_noisy, curr_mri, curr_mri_noisy - curr_mri], dim=1)
+
             assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
             with torch.cuda.amp.autocast_mode.autocast():
-                hm1 = model(curr_mri, curr_mri_noisy);
-                hm2 = model(curr_mri_noisy, curr_mri);
+                hm1 = model(volume_batch1);
+                hm2 = model(volume_batch2);
                 lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
                 lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
                 lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
@@ -373,8 +369,10 @@ def valid_pretrain_miccai(model, loader):
     with torch.no_grad():
         for idx, (batch) in pbar:
             mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda')
-            hm1 = model(mri, mri_noisy);
-            hm2 = model(mri_noisy, mri);
+            volume_batch1 = torch.cat([mri, mri_noisy, mri - mri_noisy], dim=1)
+            volume_batch2 = torch.cat([mri_noisy, mri, mri_noisy - mri], dim=1)
+            hm1 = model(volume_batch1);
+            hm2 = model(volume_batch2);
             lih1 = F.l1_loss((mri+hm1), mri_noisy);
             lih2 = F.l1_loss((mri_noisy+hm2), mri);
             lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
@@ -399,25 +397,24 @@ if __name__ == "__main__":
     #update_folds();
     #update_folds_isbi();
     #cache_mri_gradients();
-   # update_folds_miccai();
+    #update_folds_miccai();
     #cache_test_dataset_miccai(200,1);
 
-    EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}-RETRAIN";
-    RESUME = False;
-    model = VNet(n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
-    # model = UNet3D(
-    #     spatial_dims=3,
-    #     in_channels=1,
-    #     out_channels=1,
-    #     channels=(64, 128, 256, 512),
-    #     strides=(2, 2, 2),
-    #     num_res_units=2,
-    #     ).to('cuda')
-    if config.PRETRAINED:
-        ckpt = torch.load(config.PRERTRAIN_PATH);
-        model.load_state_dict(ckpt['model']);
     
-    if RESUME is True:
+
+    if config.IS_PRETRAINING:
+        model = VNet(model_type='pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+        EXP_NAME = f"Pretraining Miccai-16";
+    else:
+        EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
+        model = VNet(model_type='segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+        if config.PRETRAINED:
+            ckpt = torch.load(config.PRERTRAIN_PATH);
+            model.load_state_dict(ckpt['model']);
+
+    print(EXP_NAME);
+    
+    if config.RESUME is True:
         ckpt = torch.load('resume.ckpt');
         model.load_state_dict(ckpt['model']);
 
@@ -427,45 +424,68 @@ if __name__ == "__main__":
 
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-5);
     summary_writer = SummaryWriter(os.path.join('exp', EXP_NAME));
-    best_dice = 0;
+    if config.IS_PRETRAINING:
+        best_loss = 10;
+    else:
+        best_loss = 0;
     start_epoch = 0;
 
-    if RESUME is True:
+    if config.RESUME is True:
         optimizer.load_state_dict(ckpt['optimizer']);
         lr_scheduler.load_state_dict(ckpt['scheduler']);
-        best_dice = ckpt['best_dice'];
+        best_loss = ckpt['best_loss'];
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    train_loader, test_ids, test_dataset = get_loader_miccai(config.FOLD);
-    sample_output_interval = 10;
-    print(EXP_NAME);
+    if config.IS_PRETRAINING:
+        train_loader, test_loader = get_loader_pretrain_miccai();
+    else:
+        train_loader, test_ids, test_dataset = get_loader_miccai(config.FOLD);
+    
+    sample_output_interval = 50;
+
     for epoch in range(start_epoch, 1000):
         model.train();
-        train_loss = train_miccai(model, train_loader, optimizer, scalar); 
+        if config.IS_PRETRAINING:
+            train_loss = train_miccai_pretrain(model, train_loader, optimizer, scalar); 
+        else:
+            train_loss = train_miccai(model, train_loader, optimizer, scalar); 
+
         
         model.eval();
-        valid_dice = valid_miccai(model, test_ids, test_dataset);
+        if config.IS_PRETRAINING:
+            valid_loss = valid_pretrain_miccai(model, test_loader);
+        else:
+            valid_loss = valid_miccai(model, test_ids, test_dataset);
+        
         summary_writer.add_scalar('train/loss', train_loss, epoch);
-        summary_writer.add_scalar('valid/loss', valid_dice, epoch);
-        # if epoch %sample_output_interval == 0:
-        #     print('sampling outputs...');
-        #     #save_examples_miccai(model, test_loader);
+        summary_writer.add_scalar('valid/loss', valid_loss, epoch);
+        if epoch %sample_output_interval == 0 and config.IS_PRETRAINING:
+            print('sampling outputs...');
+            save_examples(model, test_loader);
         ckpt = {
             'model': model.state_dict(),
             'optimizer': optimizer.state_dict(),
             'scheduler': lr_scheduler.state_dict(),
-            'best_dice': best_dice,
+            'best_loss': best_loss,
             'epoch': epoch+1
         }
         torch.save(ckpt,os.path.join('exp', EXP_NAME, 'resume.ckpt'));
         lr_scheduler.step();
-
-        if best_dice < valid_dice:
-            print(f'new best model found: {valid_dice}')
-            best_dice = valid_dice;
+        
+        save_model = False;
+        if config.IS_PRETRAINING:
+            if best_loss > valid_loss:
+                save_model = True
+        else:
+            if best_loss < valid_loss:
+                save_model = True;
+        
+        if save_model:
+            print(f'new best model found: {valid_loss}')
+            best_loss = valid_loss;
             torch.save({'model': model.state_dict(), 
-                        'best_dice': best_dice,
+                        'best_loss': best_loss,
                         'hp': config.hyperparameters,
                         'log': EXP_NAME}, os.path.join('exp', EXP_NAME, 'best_model.ckpt'));
 

@@ -33,7 +33,7 @@ from scipy.ndimage import distance_transform_edt, sobel, histogram, prewitt,lapl
 from scipy.ndimage import convolve, binary_erosion, binary_opening
 from data_utils import inpaint_3d, add_synthetic_lesion_wm
 from monai.transforms import Compose, Resize, SpatialPadd, ScaleIntensityRange, Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise, RandSpatialCropSamplesd
-
+from VNet import VNet
 
 def valid(model, loader, dataset):
     print(('\n' + '%10s'*2) %('Epoch', 'Dice'));
@@ -41,9 +41,10 @@ def valid(model, loader, dataset):
     with torch.no_grad():
         for idx, (batch) in pbar:
             mri, mri_noisy, heatmap, brainmask, patient_id, loc = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].to('cuda'), batch[4], batch[5];
-
-            hm1 = model(mri, mri_noisy);
-            hm2 = model(mri_noisy, mri);
+            volume_batch1 = torch.cat([mri, mri_noisy, mri - mri_noisy], dim=1)
+            volume_batch2 = torch.cat([mri_noisy, mri, mri_noisy - mri], dim=1)
+            hm1 = model(volume_batch1);
+            hm2 = model(volume_batch2);
             pred_lbl_1 = torch.sigmoid(hm1)>0.5;
             pred_lbl_2 = torch.sigmoid(hm2)>0.5;
             pred = pred_lbl_1 * pred_lbl_2 * brainmask;
@@ -897,19 +898,20 @@ if __name__ == "__main__":
     #get_expert_results(4);
     #get_snac_results(1);
 
-    model = UNet3D(
-            spatial_dims=3,
-            in_channels=1,
-            out_channels=1,
-            channels=(64, 128, 256, 512),
-            strides=(2, 2, 2),
-            num_res_units=2,
-            );
+    # model = UNet3D(
+    #         spatial_dims=3,
+    #         in_channels=1,
+    #         out_channels=1,
+    #         channels=(64, 128, 256, 512),
+    #         strides=(2, 2, 2),
+    #         num_res_units=2,
+    #         );
+    model = VNet(n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
     segmentation = True;
     if segmentation is True:
-        exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-BL=10';
+        exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-VNet-BL=5';
         
-        for f in range(2,5):
+        for f in range(0,5):
             ckpt = torch.load(os.path.join('exp', f'{exp_name}-F{f}',  'best_model.ckpt'));
             model.load_state_dict(ckpt['model']);
             model.to('cuda');

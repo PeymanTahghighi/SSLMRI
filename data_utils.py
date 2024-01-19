@@ -779,27 +779,27 @@ def get_loader(fold):
 
     return train_loader, test_loader;   
 
-def get_loader_pretrain_miccai(fold):
-    
-    train_mri, test_mri = pickle.load(open(f'cache_miccai/{fold}.fold', 'rb'));
+def get_loader_pretrain_miccai():
 
-    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
-        train_ids = f.readline().rstrip();
-        train_ids = train_ids.split(',');
-        test_ids = f.readline().rstrip();
-        test_ids = test_ids.split(',');
-    train_ids =  [os.path.join('miccai-processed', t) for t in train_ids];
-    test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
-    
-    mri_paths = [];
-    for t in train_ids:
-        mri_paths.append(os.path.join(t, 'flair_time01_on_middle_space.nii.gz'));
-        mri_paths.append(os.path.join(t, 'flair_time02_on_middle_space.nii.gz'));
+    train_mri, test_mri = pickle.load(open(os.path.join('cache_miccai-2016', f'train_test_split.dmp'), 'rb'));
 
-    mri_dataset_train = MICCAI_PRETRAIN_Dataset(mri_paths);
-    train_loader = DataLoader(mri_dataset_train[:1] if config.USE_ONE_SAMPLE is True else mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    test_mri = glob(os.path.join('cache_miccai',f'{fold}','*.tstd'));
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri[:1] if config.USE_ONE_SAMPLE is True else test_mri , train=False);
+    # with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
+    #     train_ids = f.readline().rstrip();
+    #     train_ids = train_ids.split(',');
+    #     test_ids = f.readline().rstrip();
+    #     test_ids = test_ids.split(',');
+    # train_ids =  [os.path.join('miccai-processed', t) for t in train_ids];
+    # test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
+    
+    # mri_paths = [];
+    # for t in train_ids:
+    #     mri_paths.append(os.path.join(t, 'flair_time01_on_middle_space.nii.gz'));
+    #     mri_paths.append(os.path.join(t, 'flair_time02_on_middle_space.nii.gz'));
+
+    mri_dataset_train = MICCAI_PRETRAIN_Dataset(train_mri[:1] if config.USE_ONE_SAMPLE is True else train_mri);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
+    test_mri = glob(os.path.join('cache_miccai-2016','*.tstd'));
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri[:1] if config.USE_ONE_SAMPLE is True else test_mri, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
 
     return train_loader, test_loader; 
