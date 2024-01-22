@@ -54,35 +54,42 @@ def cache_test_dataset(num_data, test_mri, fold):
     return ret;
 
 
-def cache_test_dataset_miccai(num_data, fold):
-    if os.path.exists(f'cache_miccai/{fold}') is False:
-        os.makedirs(f'cache_miccai/{fold}');
+def cache_dataset_miccai(num_data):
+    if os.path.exists(f'cache_miccai-2016') is False:
+        os.makedirs(f'cache_miccai-2016');
     
-    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
-        train_ids = f.readline().rstrip();
-        train_ids = train_ids.split(',');
-        test_ids = f.readline().rstrip();
-        test_ids = test_ids.split(',');
+    training_centers = ['01', '07', '08'];
+    testing_centers = ['01', '03', '07', '08'];
+    all_mri_path = [];
+    for tc in training_centers:
+        patients = glob(os.path.join('miccai-2016', 'Training', f'Center_{tc}','*/'));
+        for p in patients:
+            all_mri_path.append(os.path.join(p, 'Preprocessed_Data', 'FLAIR_preprocessed.nii.gz'));
     
-    test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
-    mri_paths = [];
-    for t in test_ids:
-        mri_paths.append(os.path.join(t, 'flair_time01_on_middle_space.nii.gz'));
-        mri_paths.append(os.path.join(t, 'flair_time02_on_middle_space.nii.gz'));
+    for tc in testing_centers:
+        patients = glob(os.path.join('miccai-2016', 'Testing', f'Center_{tc}','*/'));
+        for p in patients:
+            all_mri_path.append(os.path.join(p, 'Preprocessed_Data', 'FLAIR_preprocessed.nii.gz'));
+    
+    #cache_miccai16_gradients(all_mri_path);
+    train_ids, test_ids = train_test_split(all_mri_path, test_size=0.1, shuffle=True, random_state=42);
 
     
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(mri_paths,cache=True);
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_ids,cache=True);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
 
+    test_ids = [];
     num_data = math.ceil(num_data/len(test_loader));
     counter = 0;
     ret = [];
     for n in tqdm(range(num_data)):
         for (batch) in test_loader:
-            ret.append(os.path.join('cache_miccai',f'{fold}', f'{counter}.tstd'))
-            pickle.dump([b.squeeze() for b in batch], open(os.path.join('cache_miccai',f'{fold}', f'{counter}.tstd'), 'wb'));
+            ret.append(os.path.join('cache_miccai-2016', f'{counter}.tstd'))
+            pickle.dump([b.squeeze() for b in batch], open(os.path.join('cache_miccai-2016', f'{counter}.tstd'), 'wb'));
+            test_ids.append(os.path.join('cache_miccai-2016', f'{counter}.tstd'));
             counter += 1;
 
+    pickle.dump([train_ids, test_ids], open(os.path.join('cache_miccai-2016', 'train_test_split.dmp'), 'wb'));
     return ret;
 
 class MRI_Dataset(Dataset):

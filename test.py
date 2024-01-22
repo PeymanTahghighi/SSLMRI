@@ -940,7 +940,7 @@ if __name__ == "__main__":
     if segmentation is True:
         exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-VNet-BL=10';
         
-        for f in range(2,5):
+        for f in range(1,5):
             ckpt = torch.load(os.path.join('exp', f'{exp_name}-F{f}',  'best_model.ckpt'));
             model.load_state_dict(ckpt['model']);
             model.to('cuda');

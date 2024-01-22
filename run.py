@@ -1,4 +1,4 @@
-from data_utils import cache_test_dataset_miccai,cache_mri_gradients, get_loader_pretrain_miccai, get_loader, cache_test_dataset, update_folds, update_folds_isbi, visualize_2d, update_folds_miccai, get_loader_miccai
+from data_utils import cache_dataset_miccai,cache_mri_gradients, get_loader_pretrain_miccai, get_loader, cache_test_dataset, update_folds, update_folds_isbi, visualize_2d, update_folds_miccai, get_loader_miccai
 from data_utils import predict_on_miccai
 import matplotlib.pyplot as plt
 import numpy as np
@@ -398,7 +398,7 @@ if __name__ == "__main__":
     #update_folds_isbi();
     #cache_mri_gradients();
     #update_folds_miccai();
-    #cache_test_dataset_miccai(200,1);
+    cache_dataset_miccai(200);
 
     
 
