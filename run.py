@@ -452,6 +452,7 @@ if __name__ == "__main__":
             train_loss = train_miccai(model, train_loader, optimizer, scalar); 
 
         
+        
         model.eval();
         if config.IS_PRETRAINING:
             valid_loss = valid_pretrain_miccai(model, test_loader);

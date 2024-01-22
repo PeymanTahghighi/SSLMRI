@@ -53,11 +53,16 @@ class ResidualConvBlock(nn.Module):
 
             input_channel = n_filters_out
 
+        if n_filters_in != n_filters_out:
+            self.conv_on_input = nn.Sequential(
+                nn.Conv3d(n_filters_in, n_filters_out, 3, 1, 1),
+                nn.BatchNorm3d(n_filters_out)
+            )
         self.conv = nn.Sequential(*ops)
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        x = (self.conv(x) + x)
+        x = (self.conv(x) + x if hasattr(self, 'conv_on_input') is False else self.conv_on_input(x));
         x = self.relu(x)
         return x
 
@@ -289,7 +294,7 @@ class VNet(nn.Module):
 if __name__ == '__main__':
     # compute FLOPS & PARAMETERS
     from ptflops import get_model_complexity_info
-    model = VNet(model_type='pretraining', n_channels=3, n_classes=2, normalization='batchnorm', has_dropout=True)
+    model = VNet(model_type='pretraining', n_channels=3, n_classes=2, normalization='batchnorm', has_dropout=True, has_residual=True)
     with torch.cuda.device(0):
       macs, params = get_model_complexity_info(model, (3, 96, 96, 96), as_strings=True,
                                                print_per_layer_stat=True, verbose=True)

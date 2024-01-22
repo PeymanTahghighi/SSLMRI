@@ -812,45 +812,71 @@ def predict_on_lesjak(base_path, first_mri_path, second_mri_path, model, use_cac
         d, hd, f1 = calculate_metric_percase(final_pred.numpy(), gt_padded.numpy());
         return dice, hd, f1, gt_lbl;
 
-def get_expert_results(fold):
-    with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
-        train_ids = f.readline().rstrip();
-        train_ids = train_ids.split(',');
-        test_ids = f.readline().rstrip();
-        test_ids = test_ids.split(',');
-    test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
-    exp1 = [];
-    exp2 = [];
-    exp3 = [];
-    exp4 = [];
-    for t in tqdm(test_ids):
-        g1 = nib.load(os.path.join(t, 'ground_truth_expert1.nii.gz'));
-        g2 = nib.load(os.path.join(t, 'ground_truth_expert2.nii.gz'));
-        g3 = nib.load(os.path.join(t, 'ground_truth_expert3.nii.gz'));
-        g4 = nib.load(os.path.join(t, 'ground_truth_expert4.nii.gz'));
-        g = nib.load(os.path.join(t, 'ground_truth.nii.gz'));
-        g1 = g1.get_fdata();
-        g2 = g2.get_fdata();
-        g3 = g3.get_fdata();
-        g4 = g4.get_fdata();
-        g = g.get_fdata();
-        if np.count_nonzero(g) > 0:
-            dice1, hd1, f11 = calculate_metric_percase(g1, g, simple=False);
-            dice2, hd2, f12 = calculate_metric_percase(g2, g, simple=False);
-            dice3, hd3, f13 = calculate_metric_percase(g3, g, simple=False);
-            dice4, hd4, f14 = calculate_metric_percase(g4, g, simple=False);
-            exp1.append([dice1, hd1, f11]);
-            exp2.append([dice2, hd2, f12]);
-            exp3.append([dice3, hd3, f13]);
-            exp4.append([dice4, hd4, f14]);
-    exp1 = np.mean(np.array(exp1), axis=0);
-    exp2 = np.mean(np.array(exp2), axis=0);
-    exp3 = np.mean(np.array(exp3), axis=0);
-    exp4 = np.mean(np.array(exp4), axis=0);
-    print(f'Expert1 results fold {fold} :\ndice: {exp1[0]}\thd: {exp1[1]}\tf1: {exp1[2]}');
-    print(f'\nExpert2 results fold {fold} :\ndice: {exp2[0]}\thd: {exp2[1]}\tf1: {exp2[2]}');
-    print(f'\nExpert3 results fold {fold} :\ndice: {exp3[0]}\thd: {exp3[1]}\tf1: {exp3[2]}');
-    print(f'\nExpert4 results fold {fold} :\ndice: {exp4[0]}\thd: {exp4[1]}\tf1: {exp4[2]}');
+def get_expert_results():
+    total_exp1 = [];
+    total_exp2 = [];
+    total_exp3 = [];
+    total_exp4 = [];
+    for fold in range(0, 5):
+        exp1 = [];
+        exp2 = [];
+        exp3 = [];
+        exp4 = [];
+        with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
+            train_ids = f.readline().rstrip();
+            train_ids = train_ids.split(',');
+            test_ids = f.readline().rstrip();
+            test_ids = test_ids.split(',');
+        test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
+        exp1 = [];
+        exp2 = [];
+        exp3 = [];
+        exp4 = [];
+        for t in tqdm(test_ids):
+            g1 = nib.load(os.path.join(t, 'ground_truth_expert1.nii.gz'));
+            g2 = nib.load(os.path.join(t, 'ground_truth_expert2.nii.gz'));
+            g3 = nib.load(os.path.join(t, 'ground_truth_expert3.nii.gz'));
+            g4 = nib.load(os.path.join(t, 'ground_truth_expert4.nii.gz'));
+            g = nib.load(os.path.join(t, 'ground_truth.nii.gz'));
+            g1 = g1.get_fdata();
+            g2 = g2.get_fdata();
+            g3 = g3.get_fdata();
+            g4 = g4.get_fdata();
+            g = g.get_fdata();
+            if np.count_nonzero(g) > 0:
+                dice1, hd1, f11 = calculate_metric_percase(g1, g, simple=False);
+                dice2, hd2, f12 = calculate_metric_percase(g2, g, simple=False);
+                dice3, hd3, f13 = calculate_metric_percase(g3, g, simple=False);
+                dice4, hd4, f14 = calculate_metric_percase(g4, g, simple=False);
+                exp1.append([dice1, hd1, f11]);
+                exp2.append([dice2, hd2, f12]);
+                exp3.append([dice3, hd3, f13]);
+                exp4.append([dice4, hd4, f14]);
+        exp1 = np.mean(np.array(exp1), axis=0);
+        exp2 = np.mean(np.array(exp2), axis=0);
+        exp3 = np.mean(np.array(exp3), axis=0);
+        exp4 = np.mean(np.array(exp4), axis=0);
+        total_exp1.append(exp1);
+        total_exp2.append(exp2);
+        total_exp3.append(exp3);
+        total_exp4.append(exp4);
+    mean_exp1 = np.mean(total_exp1,0);
+    std_exp1 = np.std(total_exp1,0);
+
+    mean_exp2 = np.mean(total_exp2,0);
+    std_exp2 = np.std(total_exp2,0);
+
+    mean_exp3 = np.mean(total_exp3,0);
+    std_exp3 = np.std(total_exp3,0);
+
+    mean_exp4 = np.mean(total_exp4,0);
+    std_exp4 = np.std(total_exp4,0);
+
+    print(f'Expert1 results \ndice: {mean_exp1[0]} ({std_exp1[0]})\thd: {mean_exp1[1]} ({std_exp1[1]})\tf1: {mean_exp1[2]} ({std_exp1[2]})');
+    print(f'Expert2 results \ndice: {mean_exp2[0]} ({std_exp2[0]})\thd: {mean_exp2[1]} ({std_exp2[1]})\tf1: {mean_exp2[2]} ({std_exp2[2]})');
+    print(f'Expert3 results \ndice: {mean_exp3[0]} ({std_exp3[0]})\thd: {mean_exp3[1]} ({std_exp3[1]})\tf1: {mean_exp3[2]} ({std_exp3[2]})');
+    print(f'Expert4 results \ndice: {mean_exp4[0]} ({std_exp4[0]})\thd: {mean_exp4[1]} ({std_exp4[1]})\tf1: {mean_exp4[2]} ({std_exp4[2]})');
+
 
 def get_snac_results(fold):
 
@@ -895,8 +921,8 @@ def parse_file(exp_name):
 
 if __name__ == "__main__":
 
-    #get_expert_results(4);
-    #get_snac_results(1);
+    #get_expert_results();
+    #get_snac_results(4);
 
     # model = UNet3D(
     #         spatial_dims=3,
@@ -906,12 +932,15 @@ if __name__ == "__main__":
     #         strides=(2, 2, 2),
     #         num_res_units=2,
     #         );
-    model = VNet(n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
     segmentation = True;
     if segmentation is True:
-        exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-VNet-BL=5';
+        model = VNet('segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+    else:
+        model = VNet('pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+    if segmentation is True:
+        exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-VNet-BL=10';
         
-        for f in range(0,5):
+        for f in range(2,5):
             ckpt = torch.load(os.path.join('exp', f'{exp_name}-F{f}',  'best_model.ckpt'));
             model.load_state_dict(ckpt['model']);
             model.to('cuda');
