@@ -12,6 +12,7 @@ from monai.networks.layers.factories import Act
 from typing import Optional, Sequence, Tuple, Union
 import warnings
 import numpy as np
+from monai.networks.nets.swin_unetr import SwinUNETR
 #===============================================================
 #===============================================================
 
@@ -1002,19 +1003,21 @@ class CrossAttentionUNet3D(nn.Module):
 
         return out;
 
+
 def test():
 
-    sample = torch.rand((1,1,64,128,128)).to('cuda');
+    sample = torch.rand((1,1,96,96,96)).to('cuda');
 
-    net = UNet3D(
+    net = SwinUNETR(
+        img_size=(96,96,96),
         spatial_dims=3,
-        in_channels=1,
+        in_channels=3,
         out_channels=1,
-        channels=(64, 128, 256, 512),
-        strides=(2, 2, 2),
-        num_res_units=2,
+        feature_size=48
         ).to('cuda')
     
+    ckpt = torch.load('pretrained/swin/model_swinvit.pt');
+    net.load_from(ckpt)
     total_parameters = sum(p.numel() for p in net.parameters() if p.requires_grad);
     print(f'total parameters: {total_parameters}')
     

@@ -7,9 +7,8 @@ import torch
 import config
 import torch.nn.functional as F
 from model_3d import UNet3D, ResUnet3D
-from torch.utils.tensorboard import SummaryWriter
+
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
 import os
 from torchvision.utils import save_image, make_grid
 import matplotlib.pyplot as plt
@@ -938,7 +937,7 @@ if __name__ == "__main__":
     else:
         model = VNet('pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
     if segmentation is True:
-        exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-VNet-BL=10';
+        exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-No Res-VNet-BL=5';
         
         for f in range(1,5):
             ckpt = torch.load(os.path.join('exp', f'{exp_name}-F{f}',  'best_model.ckpt'));

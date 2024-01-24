@@ -21,6 +21,7 @@ from skimage.filters import threshold_otsu
 import seaborn as sns
 from utility import BounraryLoss
 from VNet import VNet
+from monai.networks.nets.swin_unetr import SwinUNETR
 #===============================================================
 def dice_loss(input, 
                 target, 
@@ -398,16 +399,22 @@ if __name__ == "__main__":
     #update_folds_isbi();
     #cache_mri_gradients();
     #update_folds_miccai();
-    cache_dataset_miccai(200);
+   # cache_dataset_miccai(200);
 
     
 
     if config.IS_PRETRAINING:
-        model = VNet(model_type='pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+        if config.NETWORK == 'VNET':
+            model = VNet(model_type='pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+        else:
+            model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
         EXP_NAME = f"Pretraining Miccai-16";
     else:
         EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
-        model = VNet(model_type='segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+        if config.NETWORK == 'VNET':
+            model = VNet(model_type='segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+        else:
+            model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
         if config.PRETRAINED:
             ckpt = torch.load(config.PRERTRAIN_PATH);
             model.load_state_dict(ckpt['model']);
