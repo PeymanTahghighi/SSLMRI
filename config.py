@@ -9,14 +9,14 @@ hyperparameters = {
     'sample_per_mri':8,
     'deterministic':False,
     'virtual_batch_size':1,
-    'num_workers': 0,
+    'num_workers': 4,
     'bl_multiplier': 5
 }
 
 DEBUG_TRAIN_DATA = False;
 PRETRAINED = False;
 IS_PRETRAINING = False;
-USE_ONE_SAMPLE = True;
+USE_ONE_SAMPLE = False;
 FOLD = 0;
 PRERTRAIN_PATH = f'exp/Pretraining MICCAI16/best_model.ckpt';
 RESUME = False;

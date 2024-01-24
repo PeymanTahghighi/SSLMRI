@@ -408,13 +408,15 @@ if __name__ == "__main__":
             model = VNet(model_type='pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
         else:
             model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
-        EXP_NAME = f"Pretraining Miccai-16";
+        EXP_NAME = f"Pretraining Miccai-16-Net={config.NETWORK}";
     else:
-        EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
+        EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-Net={config.NETWORK}-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
         if config.NETWORK == 'VNET':
             model = VNet(model_type='segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
         else:
             model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
+            ckpt = torch.load('pretrained/swin/model_swinvit.pt');
+            model.load_from(ckpt)
         if config.PRETRAINED:
             ckpt = torch.load(config.PRERTRAIN_PATH);
             model.load_state_dict(ckpt['model']);
