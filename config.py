@@ -20,4 +20,4 @@ USE_ONE_SAMPLE = False;
 FOLD = 0;
 PRERTRAIN_PATH = f'exp/Pretraining MICCAI16/best_model.ckpt';
 RESUME = False;
-NETWORK = 'SWIN';
+NETWORK = 'VNET';

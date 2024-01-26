@@ -937,7 +937,7 @@ if __name__ == "__main__":
     else:
         model = VNet('pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
     if segmentation is True:
-        exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-No Res-VNet-BL=5';
+        exp_name = 'BL+DICE_AUGMENTATION-NOT PRETRAINED-VNet-No Res-sche-BL=10';
         
         for f in range(1,5):
             ckpt = torch.load(os.path.join('exp', f'{exp_name}-F{f}',  'best_model.ckpt'));

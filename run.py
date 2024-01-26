@@ -424,7 +424,7 @@ if __name__ == "__main__":
     print(EXP_NAME);
     
     if config.RESUME is True:
-        ckpt = torch.load('resume.ckpt');
+        ckpt = torch.load(os.path.join('exp', EXP_NAME, 'resume.ckpt'));
         model.load_state_dict(ckpt['model']);
 
     model.to('cuda');
