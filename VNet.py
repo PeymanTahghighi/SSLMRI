@@ -281,7 +281,8 @@ class VNet(nn.Module):
             self.decoder = Decoder(n_channels, n_classes, n_filters, normalization, has_dropout, has_residual, 0)
         else:
             self.ssl_head = SSLHead(n_filters);
-    
+
+        
     def forward(self, input):
         features = self.encoder(input)
         if self.modle_type == 'segmentation':

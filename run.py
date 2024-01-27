@@ -410,16 +410,19 @@ if __name__ == "__main__":
             model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
         EXP_NAME = f"Pretraining Miccai-16-Net={config.NETWORK}";
     else:
-        EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-Net={config.NETWORK}-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
         if config.NETWORK == 'VNET':
             model = VNet(model_type='segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
         else:
             model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
             ckpt = torch.load('pretrained/swin/model_swinvit.pt');
             model.load_from(ckpt)
+
         if config.PRETRAINED:
+            EXP_NAME = f"BL+DICE_AUGMENTATION-PRETRAINED-Net={config.NETWORK}-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
             ckpt = torch.load(config.PRERTRAIN_PATH);
-            model.load_state_dict(ckpt['model']);
+            model.load_state_dict(ckpt['model'], strict=False); #strict = False because ssl_head is included in the checkpoint and we want to get rid of it
+        else:
+            EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-Net={config.NETWORK}-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
 
     print(EXP_NAME);
     

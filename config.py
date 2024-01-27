@@ -14,10 +14,10 @@ hyperparameters = {
 }
 
 DEBUG_TRAIN_DATA = False;
-PRETRAINED = False;
+PRETRAINED = True;
 IS_PRETRAINING = False;
 USE_ONE_SAMPLE = False;
 FOLD = 0;
-PRERTRAIN_PATH = f'exp/Pretraining MICCAI16/best_model.ckpt';
-RESUME = False;
 NETWORK = 'VNET';
+PRERTRAIN_PATH = f'exp/Pretraining Miccai-16-Net={NETWORK}/best_model.ckpt';
+RESUME = False;
