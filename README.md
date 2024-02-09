@@ -6,7 +6,11 @@ Here, our model detects all the changes from one MRI scan to the other. The firs
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Example3.gif)
 ### Synthetic lesions
 Here you can see exampes of synthetic lesions added to MRI scans.
-
+Original MRI Patch             |  MRI patch with added lesion | Mask
+:-------------------------:|:-------------------------:|:-------------------------:
+![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_1.png)  |  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_2.png)|  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_3.png) 
+![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/2_1.png)  |  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/2_2.png)|  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/2_3.png)
+![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/3_1.png)  |  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/3_2.png)|  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/3_3.png)
 ## Usage
 ### Downloading
 Please install [PyTorch](https://pytorch.org/) and download the [MICCAI-21](https://portal.fli-iam.irisa.fr/msseg-2/) dataset. Then run standard provided preprocessing on them and put them in under 'miccai-processed' folder.
@@ -39,8 +43,4 @@ To create a gif from the prediction of the model, run:
 ```
 python test.py --segmentation --gif
 ```
-Solarized dark             |  Solarized Ocean | Mask
-:-------------------------:|:-------------------------:|:-------------------------:
-![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_1.png)  |  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_2.png)|  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_3.png) 
-![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_1.png)  |  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_2.png)|  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_3.png)
-![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_1.png)  |  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_2.png)|  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_3.png)
+
