@@ -1,3 +1,6 @@
+"""
+    Taken from https://github.com/ycwu1997/CoactSeg
+"""
 import torch
 import numpy as np
 from torch import einsum
@@ -87,21 +90,11 @@ def calculate_metric_percase(pred, gt, simple = False):
                 f1 = 0
             else:
                 f1 = (2 * sel * pl) / (sel+pl)
-            # print("TPg:{}, M:{}, TPa:{}, N:{}".format(TPg, M-1, TPa, N-1))
-            # print("sel:{}, pl:{}, f1:{}".format(sel, pl, F1))
-            # print("dice:{}, jc:{}, 95hd:{}, asd:{}, pr:{}, se:{}, sp:{}".format(dice, jc, hd, asd, precision, se, sp))
         return dice, hd, f1;
     else:
         return dice;
 
 def remove_small_regions(img_vol, min_size=3):
-    """
-        Function that removes blobs with a size smaller than a minimum from a mask
-        volume.
-        :param img_vol: Mask volume. It should be a numpy array of type bool.
-        :param min_size: Minimum size for the blobs.
-        :return: New mask without the small blobs.
-    """
     blobs, _ = nd.measurements.label(
         img_vol,
         nd.morphology.generate_binary_structure(3, 3)

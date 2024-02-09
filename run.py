@@ -1,130 +1,31 @@
-from data_utils import cache_dataset_miccai,cache_mri_gradients, get_loader_pretrain_miccai, get_loader, cache_test_dataset, update_folds, update_folds_isbi, visualize_2d, update_folds_miccai, get_loader_miccai
-from data_utils import predict_on_miccai
+from data_utils import cache_dataset_miccai, get_loader_pretrain_miccai, get_loader_miccai
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 import torch.optim as optim
 import torch
-import config
 import torch.nn.functional as F
-from model_3d import UNet3D, CrossAttentionUNet3D, ResUnet3D
 from torch.utils.tensorboard import SummaryWriter
 import os
-from torchvision.utils import save_image, make_grid
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.nn.functional as F
-from torchvision.ops.focal_loss import sigmoid_focal_loss
-from sklearn.metrics import precision_recall_fscore_support
-from monai.losses.dice import DiceLoss, DiceFocalLoss 
-from monai.losses import GeneralizedDiceFocalLoss, GeneralizedDiceLoss
-from skimage.filters import threshold_otsu
-import seaborn as sns
+from monai.losses.dice import DiceLoss
 from utility import BounraryLoss
 from VNet import VNet
 from monai.networks.nets.swin_unetr import SwinUNETR
-#===============================================================
-def dice_loss(input, 
-                target, 
-                eps=1e-7, 
-                sigmoid = False,
-                multilabel = False):
-
-    if not torch.is_tensor(input):
-            raise TypeError("Input type is not a torch.Tensor. Got {}"
-                            .format(type(input)))
-    if not input.shape[-2:] == target.shape[-2:]:
-        raise ValueError("input and target shapes must be the same. Got: {}"
-                            .format(input.shape, input.shape))
-    if not input.device == target.device:
-        raise ValueError(
-            "input and target must be in the same device. Got: {}" .format(
-                input.device, target.device))
-    # compute softmax over the classes axis
-    #input_soft = torch.sigmoid(input)
-    if sigmoid is True:
-        target = torch.sigmoid(target);
-
-
-    # compute the actual dice score
-    dims = (1, 2, 3, 4)
-    intersection = torch.sum(input * target, dims)
-    cardinality = torch.sum(input + target, dims)
-
-    dice_score = 2. * intersection / (cardinality + 1e-4)
-    return torch.mean(1. - dice_score)
-#===============================================================
-
-def train(model, train_loader, optimizer, scalar):
-    print(('\n' + '%10s'*3) %('Epoch', 'Loss', 'IoU'));
-    pbar = tqdm(enumerate(train_loader), total= len(train_loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
-    epoch_loss = [];
-    epoch_IoU = [];
-    curr_step = 0;
-    curr_iou = 0;
-    for batch_idx, (batch) in pbar:
-        mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda')
-        steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
-        curr_loss = 0;
-        for s in range(steps):
-            curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-
-            assert not torch.any(torch.isnan(curr_mri)) or not torch.any(torch.isnan(curr_mri_noisy)) or not torch.any(torch.isnan(curr_heatmap))
-            with torch.cuda.amp.autocast():
-                hm1 = model(curr_mri, curr_mri_noisy);
-                hm2 = model(curr_mri_noisy, curr_mri);
-                lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
-                lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
-                lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
-                lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
-                lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
-                loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
-
-            scalar.scale(loss).backward();
-            curr_loss += loss.item();
-            curr_step+=1;
-
-
-            if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
-                scalar.step(optimizer);
-                scalar.update();
-                
-                model.zero_grad(set_to_none = True);
-                epoch_loss.append(curr_loss);
-                epoch_IoU.append(curr_iou);
-                curr_loss = 0;
-                curr_step = 0;
-                curr_iou = 0;
-
-            pbar.set_description(('%10s' + '%10.4g'*2)%(epoch, np.mean(epoch_loss)));
-
-    return np.mean(epoch_loss);
-
-
-def valid(model, loader):
-    print(('\n' + '%10s'*2) %('Epoch', 'Loss'));
-    pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
-    epoch_loss = [];
-    with torch.no_grad():
-        for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda')
-            hm1 = model(mri, mri_noisy);
-            hm2 = model(mri_noisy, mri);
-            lih1 = F.l1_loss((mri+hm1), mri_noisy);
-            lih2 = F.l1_loss((mri_noisy+hm2), mri);
-            lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
-            lh1 = F.l1_loss((hm1)*heatmap, torch.zeros_like(hm1));
-            lh2 = F.l1_loss((hm2)*heatmap, torch.zeros_like(hm1));
-            total_loss = lih1 + lih2 + lhh + lh1 + lh2;
-
-
-            epoch_loss.append(total_loss.item());
-            pbar.set_description(('%10s' + '%10.4g')%(epoch, np.mean(epoch_loss)));
-
-    return np.mean(epoch_loss);
+import argparse
 
 def save_examples_miccai(model, loader,):
+    """save examples for segmentation of new lesions from MICCAI-21 dataset
+
+    Parameters
+    ----------
+    model : nn.Module
+        model to use for predictions
+    
+    loader : DataLoader
+        data loader to iterate through
+    """
     if os.path.exists('samples') is False:
         os.makedirs('samples');
     with torch.no_grad():
@@ -145,7 +46,6 @@ def save_examples_miccai(model, loader,):
                 mri_noisy = mri_noisy.detach().cpu().numpy();
 
                 for j in range(2):
-                    #heatmap = (1-heatmap) > 0;
                     pos_cords = np.where(heatmap[0] >0);
                     if len(pos_cords[0]) != 0:
                         r = np.random.randint(0,len(pos_cords[0]));
@@ -169,7 +69,7 @@ def save_examples_miccai(model, loader,):
                     ax[1][4].imshow(mri_noisy[0,0,:,center[1], :], cmap='gray');
                     ax[1][5].imshow(mri_noisy[0,0, :, :,center[2]], cmap='gray');
 
-                    fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
+                    fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*args.batch_size}_{j}.png'));
                     plt.close("all");
 
                 counter += 1;
@@ -177,6 +77,16 @@ def save_examples_miccai(model, loader,):
                     break;
 
 def save_examples(model, loader,):
+    """save examples for self-supervised pretrained model, it will predict all the changes from one MRI scan to the other
+
+    Parameters
+    ----------
+    model : nn.Module
+        model to use for predictions
+    
+    loader : DataLoader
+        data loader to iterate through
+    """
     if os.path.exists('samples') is False:
         os.makedirs('samples');
     with torch.no_grad():
@@ -229,14 +139,31 @@ def save_examples(model, loader,):
                 ax[2][3].imshow(mri_recon[0,0,center[0], :, :], cmap='gray');
                 ax[2][4].imshow(mri_recon[0,0,:,center[1], :], cmap='gray');
                 ax[2][5].imshow(mri_recon[0,0, :, :,center[2]], cmap='gray');
-                fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*config.hyperparameters["batch_size"]}_{j}.png'));
+                fig.savefig(os.path.join('samples',f'sample_{epoch}_{counter + idx*args.batch_size}_{j}.png'));
                 plt.close("all");
-
+            
             counter += 1;
+            #only save 5 samples
             if counter >=5:
                 break;
 
-def train_miccai(model, train_loader, optimizer, scalar):
+def train_miccai(args, model, train_loader, optimizer, scalar):
+    """one epoch of new lesion segmentation model training
+
+    Parameters
+    ----------
+    model : nn.Module
+        model to use for predictions
+    
+    train_loader : DataLoader
+        data loader to iterate through
+    
+    optimizer : torch.nn.optim
+        optimizer to minimze loss function
+
+    scaler: torch.amp.cuda.scaler
+        for mixed precision training
+    """
     print(('\n' + '%10s'*3) %('Epoch', 'Loss', 'IoU'));
     pbar = tqdm(enumerate(train_loader), total= len(train_loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     epoch_loss = [];
@@ -246,13 +173,13 @@ def train_miccai(model, train_loader, optimizer, scalar):
     for batch_idx, (batch) in pbar:
         mri, mri_noisy, heatmap, distance_transform = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(dim=0),batch[3].to('cuda').squeeze(dim=0)
 
-        steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
+        steps = args.sample_per_mri // args.batch_size;
         curr_loss = 0;
         for s in range(steps):
-            curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_distance_transform = distance_transform[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_mri = mri[s*args.batch_size:(s+1)*args.batch_size]
+            curr_mri_noisy = mri_noisy[s*args.batch_size:(s+1)*args.batch_size]
+            curr_heatmap = heatmap[s*args.batch_size:(s+1)*args.batch_size]
+            curr_distance_transform = distance_transform[s*args.batch_size:(s+1)*args.batch_size]
 
             
             volume_batch1 = torch.cat([curr_mri, curr_mri_noisy, curr_mri - curr_mri_noisy], dim=1)
@@ -266,17 +193,17 @@ def train_miccai(model, train_loader, optimizer, scalar):
                 lhf1 = DiceLoss(sigmoid=True)(hm1, curr_heatmap);
                 lhf2 = DiceLoss(sigmoid=True)(hm2, curr_heatmap);
 
-                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
-                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*config.hyperparameters['bl_multiplier'];
+                lhb1 = BounraryLoss(sigmoid=True)(hm1, curr_distance_transform)*args.bl_multiplier;
+                lhb2 = BounraryLoss(sigmoid=True)(hm2, curr_distance_transform)*args.bl_multiplier;
                 lhh = DiceLoss()(torch.sigmoid(hm1), torch.sigmoid(hm2));
-                loss = (lhf1 + lhf2 + lhb1 + lhb2 + lhh)/ config.hyperparameters['virtual_batch_size'];
+                loss = (lhf1 + lhf2 + lhb1 + lhb2 + lhh)/ args.virtual_batch_size;
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
             curr_step+=1;
             curr_iou += (1-(DiceLoss(sigmoid=True)(hm1, curr_heatmap)).item());
 
-            if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
+            if (curr_step) % args.virtual_batch_size == 0:
                 scalar.step(optimizer);
                 scalar.update();
                 
@@ -291,9 +218,23 @@ def train_miccai(model, train_loader, optimizer, scalar):
 
     return np.mean(epoch_loss);
 
+def train_miccai_pretrain(args, model, train_loader, optimizer, scalar):
+    """one epoch of self-supervised pretraining
 
-
-def train_miccai_pretrain(model, train_loader, optimizer, scalar):
+    Parameters
+    ----------
+    model : nn.Module
+        model to use for predictions
+    
+    train_loader : DataLoader
+        data loader to iterate through
+    
+    optimizer : torch.nn.optim
+        optimizer to minimze loss function
+        
+    scaler: torch.amp.cuda.scaler
+        for mixed precision training
+    """
     print(('\n' + '%10s'*3) %('Epoch', 'Loss', 'IoU'));
     pbar = tqdm(enumerate(train_loader), total= len(train_loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     epoch_loss = [];
@@ -302,12 +243,12 @@ def train_miccai_pretrain(model, train_loader, optimizer, scalar):
     curr_iou = 0;
     for batch_idx, (batch) in pbar:
         mri, mri_noisy, heatmap = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(0)
-        steps = config.hyperparameters['sample_per_mri'] // config.hyperparameters['batch_size'];
+        steps = args.sample_per_mri // args.batch_size;
         curr_loss = 0;
         for s in range(steps):
-            curr_mri = mri[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_mri_noisy = mri_noisy[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
-            curr_heatmap = heatmap[s*config.hyperparameters['batch_size']:(s+1)*config.hyperparameters['batch_size']]
+            curr_mri = mri[s*args.batch_size:(s+1)*args.batch_size]
+            curr_mri_noisy = mri_noisy[s*args.batch_size:(s+1)*args.batch_size]
+            curr_heatmap = heatmap[s*args.batch_size:(s+1)*args.batch_size]
 
             volume_batch1 = torch.cat([curr_mri, curr_mri_noisy, curr_mri - curr_mri_noisy], dim=1)
             volume_batch2 = torch.cat([curr_mri_noisy, curr_mri, curr_mri_noisy - curr_mri], dim=1)
@@ -321,14 +262,14 @@ def train_miccai_pretrain(model, train_loader, optimizer, scalar):
                 lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
                 lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
                 lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
-                loss = (lih1 + lih2 + lhh + lh1 + lh2)/ config.hyperparameters['virtual_batch_size'];
+                loss = (lih1 + lih2 + lhh + lh1 + lh2)/ args.virtual_batch_size;
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();
             curr_step+=1;
 
 
-            if (curr_step) % config.hyperparameters['virtual_batch_size'] == 0:
+            if (curr_step) % args.virtual_batch_size == 0:
                 scalar.step(optimizer);
                 scalar.update();
                 
@@ -343,7 +284,20 @@ def train_miccai_pretrain(model, train_loader, optimizer, scalar):
 
     return np.mean(epoch_loss);
 
-def valid_miccai(model, loader, dataset):
+def valid_miccai(args, model, loader, dataset):
+    """one epoch of validating new lesion segmentation model
+
+    Parameters
+    ----------
+    model : nn.Module
+        model to use for predictions
+    
+    loader : DataLoader
+        data loader to iterate through
+    
+    dataset : Dataset
+        used to append patches together and calculate the final results
+    """
     print(('\n' + '%10s'*2) %('Epoch', 'Dice'));
     pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     with torch.no_grad():
@@ -362,8 +316,20 @@ def valid_miccai(model, loader, dataset):
     epoch_dice = dataset.calculate_metrics();
     return epoch_dice;
 
+def valid_pretrain_miccai(args, model, loader):
+    """one epoch of validating self-supervised pretraining model
 
-def valid_pretrain_miccai(model, loader):
+    Parameters
+    ----------
+    model : nn.Module
+        model to use for predictions
+    
+    loader : DataLoader
+        data loader to iterate through
+    
+    dataset : Dataset
+        used to append patches together and calculate the final results
+    """
     print(('\n' + '%10s'*2) %('Epoch', 'Loss'));
     pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     epoch_loss = [];
@@ -387,93 +353,106 @@ def valid_pretrain_miccai(model, loader):
 
     return np.mean(epoch_loss);
 
-def log_gradients_in_model(model, logger, step):
-    for tag, value in model.named_parameters():
-        if value.grad is not None:
-            logger.add_histogram(tag + "/grad", value.grad.cpu(), step)
-            logger.add_histogram(tag + "/vals", value.cpu(), step)
-
 if __name__ == "__main__":
     
-    #update_folds();
-    #update_folds_isbi();
-    #cache_mri_gradients();
-    #update_folds_miccai();
-   # cache_dataset_miccai(200);
+    parser = argparse.ArgumentParser(description='SSLMRI Training', allow_abbrev=False);
+    parser.add_argument('--batch-size', default=4, type=int);
+    parser.add_argument('--crop-size-w', default=96, type=int, help='crop size for getting a patch from MRI scan');
+    parser.add_argument('--crop-size-h', default=96, type=int, help='crop size for getting a patch from MRI scan');
+    parser.add_argument('--crop-size-d', default=96, type=int, help='crop size for getting a patch from MRI scan');
+    parser.add_argument('--learning-rate', default=1e-4, type=float);
+    parser.add_argument('--sample-per-mri', default=8, type=int, help='how many samples to take from each MRI scan');
+    parser.add_argument('--deterministic', default=False, action='store_true', help='if we want to have same augmentation and same datae, for sanity check');
+    parser.add_argument('--virtual-batch-size', default=1, type=int, help='use it if batch size does not fit GPU memory');
+    parser.add_argument('--num-workers', default=0, type=int, help='num workers for data loader, should be equal to number of CPU cores');
+    parser.add_argument('--bl-multiplier', default=10, type=int, help='boundary loss coefficient');
+    parser.add_argument('--device', default='cuda', type=str, help='device to run models on');
+    parser.add_argument('--debug-train-data', default=False, action='store_true', help='debug training data for debugging purposes');
+    parser.add_argument('--pretrained', default=False, action='store_true', help='indicate wether to initalize with self-supervised pretrained  model or not');
+    parser.add_argument('--pretraining', default=False, action='store_true', help='indicate if we are doing self-supervised pretraining (True) or training of segmenation model (False)');
+    parser.add_argument('--fold', default=0, type=int, help='which fold to train and test model on');
+    parser.add_argument('--network', default='VNET', type=str, help='which model to use, SWINUNETR is the other option');
+    parser.add_argument('--pretrain-path', default=f'best_model.ckpt', type=str, help='path to self-supervised pretrain model');
+    parser.add_argument('--resume', default=False, action='store_true',  help='inidcate wether we are training from scratch or resume training');
+    parser.add_argument('--cache-mri-data', default=False, action='store_true',  help='if true, it first generate testing set for self-supervised pretraining mode, should run only once');
+    parser.add_argument('--num-cache-data', default=200,  help='number of examples to cache for testing of self-supervised pretraining');
 
-    
+    args = parser.parse_args();
 
-    if config.IS_PRETRAINING:
-        if config.NETWORK == 'VNET':
+    if args.cache_mri_data:
+        cache_dataset_miccai(args);
+
+    if args.pretraining:
+        if args.network == 'VNET':
             model = VNet(model_type='pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
         else:
             model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
-        EXP_NAME = f"Pretraining Miccai-16-Net={config.NETWORK}";
+        EXP_NAME = f"Pretraining Miccai-16-Net={args.network}";
     else:
-        if config.NETWORK == 'VNET':
+        if args.network == 'VNET':
             model = VNet(model_type='segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
         else:
             model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
             ckpt = torch.load('pretrained/swin/model_swinvit.pt');
             model.load_from(ckpt)
 
-        if config.PRETRAINED:
-            EXP_NAME = f"BL+DICE_AUGMENTATION-PRETRAINED-Net={config.NETWORK}-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
-            ckpt = torch.load(config.PRERTRAIN_PATH);
+        if args.pretrained:
+            EXP_NAME = f"BL+DICE_AUGMENTATION-PRETRAINED-Net={args.network}-BL={args.bl_multiplier}-F{args.fold}";
+            ckpt = torch.load(args.pretrain_path);
             model.load_state_dict(ckpt['model'], strict=False); #strict = False because ssl_head is included in the checkpoint and we want to get rid of it
         else:
-            EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-Net={config.NETWORK}-BL={config.hyperparameters['bl_multiplier']}-F{config.FOLD}";
+            EXP_NAME = f"BL+DICE_AUGMENTATION-NOT PRETRAINED-Net={args.network}-BL={args.bl_multiplier}-F{args.fold}";
 
     print(EXP_NAME);
     
-    if config.RESUME is True:
+    if args.resume is True:
         ckpt = torch.load(os.path.join('exp', EXP_NAME, 'resume.ckpt'));
         model.load_state_dict(ckpt['model']);
 
     model.to('cuda');
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
-    optimizer = optim.AdamW(model.parameters(), lr = config.hyperparameters['learning_rate']);
+    optimizer = optim.AdamW(model.parameters(), lr = args.learning_rate);
 
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min= 1e-5);
     summary_writer = SummaryWriter(os.path.join('exp', EXP_NAME));
-    if config.IS_PRETRAINING:
+    if args.pretraining:
         best_loss = 10;
     else:
         best_loss = 0;
     start_epoch = 0;
 
-    if config.RESUME is True:
+    if args.resume is True:
         optimizer.load_state_dict(ckpt['optimizer']);
         lr_scheduler.load_state_dict(ckpt['scheduler']);
         best_loss = ckpt['best_loss'];
         start_epoch = ckpt['epoch'];
         print(f'Resuming from epoch:{start_epoch}');
 
-    if config.IS_PRETRAINING:
-        train_loader, test_loader = get_loader_pretrain_miccai();
+    if args.pretraining:
+        train_loader, test_loader = get_loader_pretrain_miccai(args);
     else:
-        train_loader, test_ids, test_dataset = get_loader_miccai(config.FOLD);
+        train_loader, test_ids, test_dataset = get_loader_miccai(args, args.fold);
     
     sample_output_interval = 50;
 
     for epoch in range(start_epoch, 1000):
         model.train();
-        if config.IS_PRETRAINING:
-            train_loss = train_miccai_pretrain(model, train_loader, optimizer, scalar); 
+        if args.pretraining:
+            train_loss = train_miccai_pretrain(args, model, train_loader, optimizer, scalar); 
         else:
-            train_loss = train_miccai(model, train_loader, optimizer, scalar); 
+            train_loss = train_miccai(args, model, train_loader, optimizer, scalar); 
 
         
         
         model.eval();
-        if config.IS_PRETRAINING:
-            valid_loss = valid_pretrain_miccai(model, test_loader);
+        if args.pretraining:
+            valid_loss = valid_pretrain_miccai(args, model, test_loader);
         else:
-            valid_loss = valid_miccai(model, test_ids, test_dataset);
+            valid_loss = valid_miccai(args, model, test_ids, test_dataset);
         
         summary_writer.add_scalar('train/loss', train_loss, epoch);
         summary_writer.add_scalar('valid/loss', valid_loss, epoch);
-        if epoch %sample_output_interval == 0 and config.IS_PRETRAINING:
+        if epoch %sample_output_interval == 0 and args.pretraining:
             print('sampling outputs...');
             save_examples(model, test_loader);
         ckpt = {
@@ -487,7 +466,7 @@ if __name__ == "__main__":
         lr_scheduler.step();
         
         save_model = False;
-        if config.IS_PRETRAINING:
+        if args.pretraining:
             if best_loss > valid_loss:
                 save_model = True
         else:
@@ -499,11 +478,4 @@ if __name__ == "__main__":
             best_loss = valid_loss;
             torch.save({'model': model.state_dict(), 
                         'best_loss': best_loss,
-                        'hp': config.hyperparameters,
                         'log': EXP_NAME}, os.path.join('exp', EXP_NAME, 'best_model.ckpt'));
-
-
-
-
-
-    

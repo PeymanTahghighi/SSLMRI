@@ -5,25 +5,27 @@ from glob import glob
 import numpy as np
 from copy import deepcopy, copy
 import matplotlib.pyplot as plt
-
 import torch
-import config
-from sklearn.model_selection import train_test_split, KFold, StratifiedKFold
+from sklearn.model_selection import train_test_split
 import nibabel as nib
-from skimage.filters import gaussian, sobel, threshold_otsu, try_all_threshold, threshold_triangle, threshold_mean
-from monai.transforms import Compose, Resize, SpatialPadd, ScaleIntensityRange, Rand3DElastic, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise, RandSpatialCropSamplesd
-from scipy.ndimage import convolve, binary_erosion, binary_opening
+from skimage.filters import sobel, threshold_otsu
+from monai.transforms import Compose, Resize, Resize, RandGaussianSmooth, OneOf, RandGibbsNoise, RandGaussianNoise, GaussianSmooth, NormalizeIntensity, RandCropByPosNegLabeld, GibbsNoise, RandSpatialCropSamplesd
+from scipy.ndimage import binary_opening
 from tqdm import tqdm
 import math
 from patchify import patchify
-import seaborn as sns
-from scipy.ndimage import distance_transform_edt, sobel, histogram, prewitt,laplace, gaussian_filter
-from monai.losses.dice import DiceLoss
+from scipy.ndimage import distance_transform_edt, sobel, gaussian_filter
 from utility import calculate_metric_percase
 
-
 def window_center_adjustment(img):
+    """window center adjustment, similar to what ITKSnap does
 
+    Parameters
+    ----------
+    img : np.ndarray
+        input image
+
+    """
     hist = np.histogram(img.ravel(), bins = int(np.max(img)))[0];
     hist = hist / (hist.sum()+1e-4);
     hist = np.cumsum(hist);
@@ -35,26 +37,15 @@ def window_center_adjustment(img):
 
     return adjusted_img;
 
-def cache_test_dataset(num_data, test_mri, fold):
-    if os.path.exists(f'cache/{fold}') is False:
-        os.makedirs(f'cache/{fold}');
-    
-    mri_dataset_test = MRI_Dataset(test_mri,cache=True);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
+def cache_dataset_miccai(args):
+    """cache testing dataset for self-supervised pretraining model
 
-    num_data = math.ceil(num_data/len(test_loader));
-    counter = 0;
-    ret = [];
-    for n in range(num_data):
-        for (batch) in test_loader:
-            ret.append(os.path.join('cache',f'{fold}', f'{counter}.tstd'))
-            pickle.dump([b.squeeze() for b in batch], open(os.path.join('cache',f'{fold}', f'{counter}.tstd'), 'wb'));
-            counter += 1;
+    Parameters
+    ----------
+    args : dict
+        arguments
 
-    return ret;
-
-
-def cache_dataset_miccai(num_data):
+    """
     if os.path.exists(f'cache_miccai-2016') is False:
         os.makedirs(f'cache_miccai-2016');
     
@@ -71,15 +62,14 @@ def cache_dataset_miccai(num_data):
         for p in patients:
             all_mri_path.append(os.path.join(p, 'Preprocessed_Data', 'FLAIR_preprocessed.nii.gz'));
     
-    #cache_miccai16_gradients(all_mri_path);
     train_ids, test_ids = train_test_split(all_mri_path, test_size=0.1, shuffle=True, random_state=42);
 
     
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_ids,cache=True);
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(args, test_ids,cache=True);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=0, pin_memory=True);
 
     test_ids = [];
-    num_data = math.ceil(num_data/len(test_loader));
+    num_data = math.ceil(args.num_cache_data/len(test_loader));
     counter = 0;
     ret = [];
     for n in tqdm(range(num_data)):
@@ -92,131 +82,35 @@ def cache_dataset_miccai(num_data):
     pickle.dump([train_ids, test_ids], open(os.path.join('cache_miccai-2016', 'train_test_split.dmp'), 'wb'));
     return ret;
 
-class MRI_Dataset(Dataset):
-    def __init__(self, mr_images, train = True, cache = False) -> None:
-        super().__init__();
-        m1 = 0.7;
-        m2 = 0.8;
-        self.augment_noisy_image = OneOf([
-            RandGaussianSmooth(prob=1.0, sigma_x=(m1,m2), sigma_y=(m1,m2), sigma_z=(m1,m2)),
-            RandGaussianNoise(prob=1.0,std=0.05),
-            RandGibbsNoise(prob=1.0, alpha=(0.65,0.75))
-        ], weights=[1,1,1])
+def cropper(mri1, 
+            mri2, 
+            gt, 
+            gr, 
+            roi_size,
+            num_samples):
+    """crop two time-points MRI scans at the same time for new lesion segmentation model
 
+    Parameters
+    ----------
+    mri1 : np.ndarray
+        first MRI scan
 
-        self.transforms = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
-        self.crop = RandCropByPosNegLabeld(
-            keys=['image', 'gradient', 'mask'], 
-            label_key='mask', 
-            spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
-            pos=1, 
-            neg=0,
-            num_samples=1 if cache else config.hyperparameters['sample_per_mri'] if train else 1);
-        self.resize = Resize(spatial_size=[config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']]);
+    mri2 : np.ndarray
+        second MRI scan
 
-        self.train = train;
-        self.cache = cache;
+    gt : np.ndarray
+        ground truth segmentations
 
-        self.mr_images = [];
+    gr : np.ndarray
+        gradients of MRI scan
 
-        if train or cache:
-            for mr in mr_images:
-                file_name = mr[mr.rfind('\\')+1:];
-                file_name = file_name[:file_name.find('.')];
-                g = pickle.load(open(os.path.join('mri_data', f'{file_name}.gradient'), 'rb'));
-                g = np.expand_dims(g, axis=0);
+    rot_size : list
+        size to crop for three axis
 
-                mrimage = nib.load(mr.replace('\\','/'))
-                mrimage = nib.as_closest_canonical(mrimage);
-                mrimage = mrimage.get_fdata()
-                mrimage = window_center_adjustment(mrimage);
-                self.mr_images.append([mrimage, g]);
-        else:
-            for mr in mr_images:
-                mrimage = pickle.load(open(mr, 'rb'))
-                self.mr_images.append(mrimage);
-    
-    def __len__(self):
-        return len(self.mr_images);
+    num_samples : int
+        number of samples to crop
 
-    def __getitem__(self, index):
-        if self.train:
-            # mrimage = nib.load(self.mr_images[index])
-            # mrimage = nib.as_closest_canonical(mrimage);
-            # mrimage = mrimage.get_fdata()
-            # mrimage = window_center_adjustment(mrimage);
-            mrimage = self.mr_images[index][0];
-            mask = mrimage > threshold_otsu(mrimage);
-            g = self.mr_images[index][1];
-            
-            mask = np.expand_dims(mask, axis=0);
-            mrimage = np.expand_dims(mrimage, axis=0);
-            mrimage = mrimage / (np.max(mrimage)+1e-4);
-            
-
-            ret_mrimage = None;
-            ret_mrimage_noisy = None;
-            ret_mask = None;
-            ret_total_heatmap = None;
-
-            if config.hyperparameters['deterministic'] is False:
-                ret_transforms = self.crop({'image': mrimage,'gradient': g, 'mask': mask});
-            
-            for i in range(config.hyperparameters['sample_per_mri'] if self.cache is False else 1):
-                if config.hyperparameters['deterministic'] is False:
-                    mrimage_c = ret_transforms[i]['image'];
-                    g_c = ret_transforms[i]['gradient'];
-                    mask_c = ret_transforms[i]['mask'];
-                    mrimage_noisy = copy(mrimage_c);
-                else:
-                    mrimage_c = mrimage[:, int(mrimage.shape[1]/2-32):int(mrimage.shape[1]/2+32), int(mrimage.shape[2]/2-32):int(mrimage.shape[2]/2+32), int(mrimage.shape[3]/2-32):int(mrimage.shape[3]/2+32)];
-                    g_c = g[:, int(mrimage.shape[1]/2-32):int(mrimage.shape[1]/2+32), int(mrimage.shape[2]/2-32):int(mrimage.shape[2]/2+32), int(mrimage.shape[3]/2-32):int(mrimage.shape[3]/2+32)];
-                    mask_c = mrimage[:, int(mrimage.shape[1]/2-32):int(mrimage.shape[1]/2+32), int(mrimage.shape[2]/2-32):int(mrimage.shape[2]/2+32), int(mrimage.shape[3]/2-32):int(mrimage.shape[3]/2+32)];
-                    mrimage_noisy = copy(mrimage_c);
-                    mrimage_c = torch.from_numpy(mrimage_c);
-                    mrimage_noisy = torch.from_numpy(mrimage_noisy);
-                    g_c = torch.from_numpy(g_c);
-                    mask_c = torch.from_numpy(mask_c);
-
-                total_heatmap = torch.zeros_like(mrimage_noisy, dtype=torch.float64);
-
-
-                num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
-                for i in range(num_corrupted_patches):
-                    mrimage_noisy, heatmap, noise, center = inpaint_3d(mrimage_noisy, g_c)
-                    total_heatmap += heatmap;
-                # total_heatmap_thresh = total_heatmap > 0;
-                #pos_cords = np.where(total_heatmap_thresh == 1);
-                #r = np.random.randint(0,len(pos_cords[0]));
-                #center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
-                total_heatmap_thresh = torch.where(total_heatmap > 0.9, 0.0, 1.0);
-                if config.hyperparameters['deterministic'] is True:
-                    mrimage_noisy = GibbsNoise(alpha = 0.65)(mrimage_noisy);
-                else:
-                    mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
-                #visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, noise], center);
-                
-                
-                mrimage_c = self.transforms(mrimage_c)[0];
-                mrimage_noisy = self.transforms(mrimage_noisy)[0];
-
-                if ret_mrimage is None:
-                    ret_mrimage = mrimage_c.unsqueeze(dim=0);
-                    ret_mrimage_noisy = mrimage_noisy.unsqueeze(dim=0);
-                    ret_mask = mask_c.unsqueeze(dim=0);
-                    ret_total_heatmap = total_heatmap_thresh.unsqueeze(dim=0);
-                else:
-                    ret_mrimage = torch.concat([ret_mrimage, mrimage_c.unsqueeze(dim=0)], dim=0);
-                    ret_mrimage_noisy = torch.concat([ret_mrimage_noisy, mrimage_noisy.unsqueeze(dim=0)], dim=0);
-                    ret_mask = torch.concat([ret_mask, mask_c.unsqueeze(dim=0)], dim=0);
-                    ret_total_heatmap = torch.concat([ret_total_heatmap, total_heatmap_thresh.unsqueeze(dim=0)], dim=0);
-            
-            return ret_mrimage, ret_mrimage_noisy, ret_mask, ret_total_heatmap;
-        else:
-            ret = self.mr_images[index];
-            return ret;
-
-def cropper(mri1, mri2, gt, gr, roi_size, num_samples):
+    """
     ret = [];
     for i in range(num_samples):
         pos_cords = np.where(gt > 0);
@@ -285,8 +179,38 @@ def cropper(mri1, mri2, gt, gr, roi_size, num_samples):
     return ret;
 
 class MICCAI_PRETRAIN_Dataset(Dataset):
-    def __init__(self, mr_images, train = True, cache = False) -> None:
+    """Dataset for self-supervised pretraining
+
+    it returns examples for training which includes to MRI patch and one ground truth labels
+
+    Parameters
+    ----------
+    args : dict
+        arguments
+
+    mr_images : list
+        list of mri images, should a string list
+
+    train : bool
+        indicate if we are in training or testing mode
+
+    cache: bool
+        inidicate if we are only caching dataset or we are using it for training
+
+    Attributes
+    ----------
+    mr_imges : list
+        list of loaded mri scans
+
+    """
+    def __init__(self, 
+                 args, 
+                 mr_images, 
+                 train = True,
+                 cache = False) -> None:
         super().__init__();
+
+        self.args = args;
         m1 = 0.7;
         m2 = 0.8;
         self.augment_noisy_image = OneOf([
@@ -300,11 +224,11 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
         self.crop = RandCropByPosNegLabeld(
             keys=['image', 'gradient', 'thresh', 'mask'], 
             label_key='mask', 
-            spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
+            spatial_size= (args.crop_size_w, args.crop_size_h, args.crop_size_d),
             pos=1, 
             neg=0,
-            num_samples=1 if cache else config.hyperparameters['sample_per_mri'] if train else 1);
-        self.resize = Resize(spatial_size=[config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']]);
+            num_samples=1 if cache else args.sample_per_mri if train else 1);
+        self.resize = Resize(spatial_size=[args.crop_size_w, args.crop_size_h, args.crop_size_d]);
 
         self.train = train;
         self.cache = cache;
@@ -332,34 +256,23 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
 
     def __getitem__(self, index):
         if self.train:
-            # mrimage = nib.load(self.mr_images[index])
-            # mrimage = nib.as_closest_canonical(mrimage);
-            # mrimage = mrimage.get_fdata()
-            # mrimage = window_center_adjustment(mrimage);
             mrimage, gr = self.mr_images[index];
             mask = mrimage > threshold_otsu(mrimage);            
             mask = np.expand_dims(mask, axis=0);
             mrimage = np.expand_dims(mrimage, axis=0);
             mrimage = mrimage / (np.max(mrimage)+1e-4);
 
-           # gr = sobel(mrimage);
             g = (mrimage > 0.9);
-            #g = binary_opening(g.squeeze(), structure=np.ones((2,2,2))).astype(g.dtype)
             g = torch.from_numpy(g);
-            #g = g < threshold_otsu(g);
-           # g = np.expand_dims(gr, axis=0);
-            
-
             ret_mrimage = None;
             ret_mrimage_noisy = None;
-            ret_mask = None;
             ret_total_heatmap = None;
 
-            if config.hyperparameters['deterministic'] is False:
+            if self.args.deterministic is False:
                 ret_transforms = self.crop({'image': mrimage,'gradient': g, 'thresh': mask, 'mask': g});
             
-            for i in range(config.hyperparameters['sample_per_mri'] if self.cache is False else 1):
-                if config.hyperparameters['deterministic'] is False:
+            for i in range(self.args.sample_per_mri if self.cache is False else 1):
+                if self.args.deterministic is False:
                     mrimage_c = ret_transforms[i]['image'];
                     g_c = ret_transforms[i]['gradient'];
                     mask_c = ret_transforms[i]['thresh'];
@@ -376,48 +289,42 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
 
                 total_heatmap = torch.zeros_like(mrimage_noisy, dtype=torch.float64);
 
+                num_corrupted_patches = np.random.randint(1,5) if self.args.deterministic is False else 3;
 
-                num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
-                #for i in range(1):
-                mrimage_noisy, heatmap, noise, center = inpaint_3d(mrimage_noisy, g_c, num_corrupted_patches)
+                mrimage_noisy, heatmap, noise, center = inpaint_3d(mrimage_noisy, g_c, num_corrupted_patches, self.args.deterministic)
                 total_heatmap += heatmap;
                 
                 total_heatmap = total_heatmap * mask_c;
                 mrimage_noisy = mrimage_noisy * mask_c;
                 mrimage_c = mrimage_c * mask_c;
-                # total_heatmap_thresh = total_heatmap > 0;
-                #pos_cords = np.where(total_heatmap_thresh == 1);
-                #r = np.random.randint(0,len(pos_cords[0]));
-                #center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
+
                 total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
                 part_first = mrimage_c * total_heatmap_thresh;
                 part_second = mrimage_noisy * total_heatmap_thresh;
-                if config.hyperparameters['deterministic'] is True:
+                if self.args.deterministic is True:
                     mrimage_noisy = GibbsNoise(alpha = 0.65)(mrimage_noisy);
                 else:
                     mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
 
                 diff = torch.abs(part_first - part_second) > (0.2);
 
-                
                 total_heatmap_thresh = torch.where(diff > 0, 0, 1);
                 
-                if config.DEBUG_TRAIN_DATA:
+                if self.args.debug_train_data:
                     visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, diff, g_c], center);
                 
                 mrimage_c = self.transforms(mrimage_c)[0];
                 mrimage_noisy = self.transforms(mrimage_noisy)[0];
 
-
                 if ret_mrimage is None:
                     ret_mrimage = mrimage_c.unsqueeze(dim=0);
                     ret_mrimage_noisy = mrimage_noisy.unsqueeze(dim=0);
-                    #ret_mask = mask_c.unsqueeze(dim=0);
+
                     ret_total_heatmap = total_heatmap_thresh.unsqueeze(dim=0);
                 else:
                     ret_mrimage = torch.concat([ret_mrimage, mrimage_c.unsqueeze(dim=0)], dim=0);
                     ret_mrimage_noisy = torch.concat([ret_mrimage_noisy, mrimage_noisy.unsqueeze(dim=0)], dim=0);
-                    #ret_mask = torch.concat([ret_mask, mask_c.unsqueeze(dim=0)], dim=0);
+
                     ret_total_heatmap = torch.concat([ret_total_heatmap, total_heatmap_thresh.unsqueeze(dim=0)], dim=0);
             
             return ret_mrimage, ret_mrimage_noisy, ret_total_heatmap;
@@ -426,8 +333,33 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
             return ret;
 
 class MICCAI_Dataset(Dataset):
-    def __init__(self, patient_ids, train = True) -> None:
+    """Dataset for self-supervised pretraining
+
+    it returns examples for training which includes to MRI patch and one ground truth labels
+
+    Parameters
+    ----------
+    args : dict
+        arguments
+
+    patient_ids : list
+        list of mri images, should a string list
+
+    train : bool
+        indicate if we are in training or testing mode
+
+    Attributes
+    ----------
+    mr_imges : list
+        list of loaded mri scans
+
+    """
+    def __init__(self, 
+                 args, 
+                 patient_ids, 
+                 train = True) -> None:
         super().__init__();
+        self.args = args;
         m1 = 0.4;
         m2 = 0.5;
         self.augment_noisy_image = OneOf([
@@ -449,10 +381,10 @@ class MICCAI_Dataset(Dataset):
                 RandCropByPosNegLabeld(
                 keys=['image1', 'image2', 'mask', 'lbl', 'gradient'], 
                 label_key='image1', 
-                spatial_size= (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
+                spatial_size= (args.crop_size_w, args.crop_size_h, args.crop_size_d),
                 pos=1, 
                 neg=0,
-                num_samples=config.hyperparameters['sample_per_mri'] if train else 1,)
+                num_samples=args.sample_per_mri if train else 1,)
             ]
         )
 
@@ -509,13 +441,10 @@ class MICCAI_Dataset(Dataset):
                 mri1 = mri1 / (np.max(mri1)+1e-4);
                 mri2 = mri2 / (np.max(mri2)+1e-4);
 
-                #visualize_2d([mri1,mri2, mask], [20, 20, 20]);
-
-
                 w,h,d = mri1.shape;
-                new_w = math.ceil(w / config.hyperparameters['crop_size_w']) * config.hyperparameters['crop_size_w'];
-                new_h = math.ceil(h / config.hyperparameters['crop_size_h']) * config.hyperparameters['crop_size_h'];
-                new_d = math.ceil(d / config.hyperparameters['crop_size_d']) * config.hyperparameters['crop_size_d'];
+                new_w = math.ceil(w / args.crop_size_w) * args.crop_size_w;
+                new_h = math.ceil(h / args.crop_size_h) * args.crop_size_h;
+                new_d = math.ceil(d / args.crop_size_d) * args.crop_size_d;
 
                 mri1_padded  = np.zeros((new_w, new_h, new_d), dtype = mri1.dtype);
                 mri2_padded  = np.zeros((new_w, new_h, new_d), dtype = mri2.dtype);
@@ -527,24 +456,19 @@ class MICCAI_Dataset(Dataset):
                 gt_padded[:w,:h,:d] = gt;
                 brainmask_padded[:w,:h,:d] = brainmask;
 
-                self.step_w, self.step_h, self.step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
+                self.step_w, self.step_h, self.step_d = args.crop_size_w, args.crop_size_h, args.crop_size_d;
                 mri1_patches = patchify(mri1_padded, 
-                                                    (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                    (args.crop_size_w, args.crop_size_h, args.crop_size_d), 
                                                     (self.step_w, self.step_h, self.step_d));
                 mri2_patches = patchify(mri2_padded, 
-                                                    (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                    (args.crop_size_w, args.crop_size_h, args.crop_size_d), 
                                                     (self.step_w, self.step_h, self.step_d));
                 gt_patches = patchify(gt_padded, 
-                                                    (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                    (args.crop_size_w, args.crop_size_h, args.crop_size_d), 
                                                     (self.step_w, self.step_h, self.step_d));
                 brainmask_patches = patchify(brainmask_padded, 
-                                                    (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
+                                                    (args.crop_size_w, args.crop_size_h, args.crop_size_d), 
                                                     (self.step_w, self.step_h, self.step_d));
-                # mri1_patches = mri1_patches.reshape(mri1_patches.shape[0]*mri1_patches.shape[1]*mri1_patches.shape[2], mri1_patches.shape[3], mri1_patches.shape[4],mri1_patches.shape[5]);
-                # mri2_patches = mri2_patches.reshape(mri2_patches.shape[0]*mri2_patches.shape[1]*mri2_patches.shape[2], mri2_patches.shape[3], mri2_patches.shape[4],mri2_patches.shape[5]);
-                # gt_patches = gt_patches.reshape(gt_patches.shape[0]*gt_patches.shape[1]*gt_patches.shape[2], gt_patches.shape[3], gt_patches.shape[4],gt_patches.shape[5]);
-                # brainmask_patches = brainmask_patches.reshape(brainmask_patches.shape[0]*brainmask_patches.shape[1]*brainmask_patches.shape[2], brainmask_patches.shape[3], brainmask_patches.shape[4],brainmask_patches.shape[5]);
-
                 curr_data = [];
                 for i in range(mri1_patches.shape[0]):
                     for j in range(mri1_patches.shape[1]):
@@ -584,14 +508,14 @@ class MICCAI_Dataset(Dataset):
             mri2 = mri2 / (np.max(mri2)+1e-4);
             
 
-            if config.hyperparameters['deterministic'] is False:
+            if self.args.deterministic is False:
                 if np.sum(gt) != 0:
                     ret_transforms = cropper(mri1, 
                                              mri2, 
                                              gt,
                                              gr, 
-                                             roi_size=(config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']),
-                                             num_samples=config.hyperparameters['sample_per_mri'] if self.train else 1);
+                                             roi_size=(self.args.crop_size_w, self.args.crop_size_h, self.args.crop_size_d),
+                                             num_samples=self.args.sample_per_mri if self.train else 1);
                 else:
                     ret_transforms = self.crop_rand({'image1': mri1, 'image2': mri2,'mask': gt, 'gradient':gr, 'lbl' :np.ones_like(mri1)});
             
@@ -600,8 +524,8 @@ class MICCAI_Dataset(Dataset):
             ret_gt = None;
             ret_dt = None;
 
-            for i in range(config.hyperparameters['sample_per_mri']):
-                if config.hyperparameters['deterministic'] is False:
+            for i in range(self.args.sample_per_mri):
+                if self.args.deterministic is False:
                     mri1_c = ret_transforms[i]['image1'];
                     mri2_c = ret_transforms[i]['image2'];
                     gr_c = ret_transforms[i]['gradient'];
@@ -628,9 +552,9 @@ class MICCAI_Dataset(Dataset):
                 g = torch.from_numpy(np.expand_dims(g, axis=0));
 
                 
-                num_corrupted_patches = np.random.randint(1,5) if config.hyperparameters['deterministic'] is False else 3;
+                num_corrupted_patches = np.random.randint(1,5) if self.args.deterministic is False else 3;
                 for _ in range(num_corrupted_patches):
-                    mri2_c, heatmap = add_synthetic_lesion_wm(mri2_c, g)
+                    mri2_c, heatmap = add_synthetic_lesion_wm(mri2_c, g, self.args.deterministic)
                     total_heatmap = torch.clamp(heatmap+total_heatmap, 0, 1);
 
                 total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
@@ -645,7 +569,7 @@ class MICCAI_Dataset(Dataset):
                 dt = pos_dt - neg_dt ;
                 dt = torch.from_numpy(np.expand_dims(dt, axis = 0));
                 
-                if config.DEBUG_TRAIN_DATA:
+                if self.args.debug_train_data:
                     pos_cords = np.where(total_heatmap_thresh >0.0);
                     if len(pos_cords[0]) != 0:
                         r = np.random.randint(0,len(pos_cords[0]));
@@ -656,7 +580,6 @@ class MICCAI_Dataset(Dataset):
                 
                 mri1_c = self.transforms(mri1_c);
 
-                #mri2_c = self.augment_noisy_image(mri2_c);
                 mri2_c = self.transforms(mri2_c);
 
                 if ret_mri1 is None:
@@ -683,7 +606,7 @@ class MICCAI_Dataset(Dataset):
             ret_mri1 = self.transforms(mri1);
             ret_mri2 = self.transforms(mri2);
 
-            if config.DEBUG_TRAIN_DATA:
+            if self.args.debug_train_data:
                 pos_cords = np.where(ret_gt == 1);
                 if len(pos_cords[0]) != 0:
                     r = np.random.randint(0,len(pos_cords[0]));
@@ -693,12 +616,38 @@ class MICCAI_Dataset(Dataset):
                 visualize_2d([ret_mri1, ret_mri2, ret_gt, brainmask], center);
 
             return ret_mri1, ret_mri2, ret_gt, brainmask, patient_id, loc;
-    def update_prediction(self, pred, patient_id, loc):
-        self.pred_data[patient_id][(loc[0].item())*self.step_w:(loc[0].item())*self.step_w + config.hyperparameters['crop_size_w'], 
-                                (loc[1].item())*self.step_h:((loc[1].item()))*self.step_h + config.hyperparameters['crop_size_h'], 
-                                (loc[2].item())*self.step_d:((loc[2].item()))*self.step_d + config.hyperparameters['crop_size_d']] = np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
+    def update_prediction(self, 
+                          pred, 
+                          patient_id, 
+                          loc):
+        """saves the prediction into the predefined tensor.
+            location is set through 'loc' parameter
+
+        
+        Parameters
+        ----------
+        pred : np.ndarray
+            prediction from the model for a particular patch of MRI.
+
+        patient_id : str
+            indicate for which testing example this prediction is.
+
+        loc : int
+            location of this predicted patch in the list of all patches for one particular example.
+
+        """
+        self.pred_data[patient_id][(loc[0].item())*self.step_w:(loc[0].item())*self.step_w + self.args.crop_size_w, 
+                                (loc[1].item())*self.step_h:((loc[1].item()))*self.step_h + self.args.crop_size_h, 
+                                (loc[2].item())*self.step_d:((loc[2].item()))*self.step_d + self.args.crop_size_d] = np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
 
     def calculate_metrics(self, simple = True):
+        """After finishing all the prediction, we calculate F1, HD and dice metrics
+
+        Parameters
+        ----------
+        simple : bool
+            if true, only dice score is computer, otherwise F1 and HD are also computed.
+        """
         ret = [];
         for k in tqdm(self.pred_data.keys()):
             if simple is True:
@@ -709,109 +658,31 @@ class MICCAI_Dataset(Dataset):
                 ret.append(dice if simple is True else [dice, hd, f1]);
         return np.mean(ret) if simple is True else np.mean(np.array(ret), axis =0);
 
+def get_loader_pretrain_miccai(args):
+    """prepare train and test loader for self-supervised pretraining model
 
-def update_folds(num_test_data = 200):
-    if os.path.exists('cache') is False:
-        os.makedirs('cache');
-
-    mri_files = glob(os.path.join('mri_data','*.nii.gz'));
-    patient_mri = dict();
-    for mri_path in mri_files:
-        patient_name = mri_path[:mri_path.find('-')];
-        if patient_name not in patient_mri:
-            patient_mri[patient_name] = [mri_path];
-        else:
-            patient_mri[patient_name].append(mri_path);
-
-    kfold = KFold(5, random_state=42, shuffle=True);
-    patient_list = list(patient_mri.keys());
-    f = 0;
-    for train_idx, test_idx in kfold.split(patient_list):
-        train_mri = [patient_mri[patient_list[t]] for t in train_idx];
-        train_mri = [item for pn in train_mri for item in pn];
-        test_mri = [patient_mri[patient_list[t]] for t in test_idx];
-        test_mri = [item for pn in test_mri for item in pn];
-        test_mri = cache_test_dataset(num_test_data, test_mri, f);
-        pickle.dump([train_mri, test_mri], open(f'cache/{f}.fold', 'wb'));
-        f+=1;
-
-def update_folds_isbi():
-    if os.path.exists('cache_isbi') is False:
-        os.makedirs('cache_isbi');
-
-    #patient_ids = np.array([name for name in os.listdir('isbi') if os.path.isdir(f'isbi/{name}')]);
-    patient_ids = glob('isbi/*/');
-    patient_ids = np.array([p.replace('\\', '/')[:len(p)-1] for p in patient_ids])
-
-    kfold = KFold(5, random_state=42, shuffle=True);
-    f = 0;
-    for train_idx, test_idx in kfold.split(patient_ids):
-        train_ids, test_ids = patient_ids[train_idx], patient_ids[test_idx];
-
-        pickle.dump([train_ids, test_ids], open(f'cache_isbi/{f}.fold', 'wb'));
-        f+=1;
-
-def update_folds_miccai():
-    if os.path.exists('cache_miccai') is False:
-        os.makedirs('cache_miccai');
-
-    patient_ids = glob('miccai-processed/*/');
-    patient_ids = np.array([p.replace('\\', '/')[:len(p)-1] for p in patient_ids])
-
-    labels = [];
-    for p in patient_ids:
-        gt = nib.load(os.path.join(p, f'ground_truth.nii.gz'));
-        gt = gt.get_fdata();
-        lbl = np.sum(gt) > 0;
-        labels.append(lbl);
-
-
-    kfold = StratifiedKFold(5, random_state=42, shuffle=True);
-    f = 0;
-    for train_idx, test_idx in kfold.split(patient_ids,labels):
-        train_ids, test_ids = patient_ids[train_idx], patient_ids[test_idx];
-
-        pickle.dump([train_ids, test_ids], open(f'cache_miccai/{f}.fold', 'wb'));
-        f+=1;
-
-def get_loader(fold):
-    
-    train_mri, test_mri = pickle.load(open(f'cache/{fold}.fold', 'rb'));
-
-    mri_dataset_train = MRI_Dataset(train_mri);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    test_mri = glob(os.path.join('cache',f'{fold}','*.tstd'));
-    mri_dataset_test = MRI_Dataset(test_mri, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-
-    return train_loader, test_loader;   
-
-def get_loader_pretrain_miccai():
-
+        Parameters
+        ----------
+        args : dict
+            arguments.
+    """
     train_mri, test_mri = pickle.load(open(os.path.join('cache_miccai-2016', f'train_test_split.dmp'), 'rb'));
 
-    # with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
-    #     train_ids = f.readline().rstrip();
-    #     train_ids = train_ids.split(',');
-    #     test_ids = f.readline().rstrip();
-    #     test_ids = test_ids.split(',');
-    # train_ids =  [os.path.join('miccai-processed', t) for t in train_ids];
-    # test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
-    
-    # mri_paths = [];
-    # for t in train_ids:
-    #     mri_paths.append(os.path.join(t, 'flair_time01_on_middle_space.nii.gz'));
-    #     mri_paths.append(os.path.join(t, 'flair_time02_on_middle_space.nii.gz'));
-
-    mri_dataset_train = MICCAI_PRETRAIN_Dataset(train_mri[:1] if config.USE_ONE_SAMPLE is True else train_mri);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(test_mri[:1] if config.USE_ONE_SAMPLE is True else test_mri, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
+    mri_dataset_train = MICCAI_PRETRAIN_Dataset(args, train_mri);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=args.num_workers, pin_memory=True);
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(args, test_mri, train=False);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=args.num_workers, pin_memory=True);
 
     return train_loader, test_loader; 
 
-def get_loader_miccai(fold):
-    
+def get_loader_miccai(args, fold):
+    """prepare train and test loader for new lesion segmentation model
+
+        Parameters
+        ----------
+        args : dict
+            arguments.
+    """
     with open(os.path.join('cache_miccai', f'fold{fold}.txt'), 'r') as f:
         train_ids = f.readline().rstrip();
         train_ids = train_ids.split(',');
@@ -821,29 +692,21 @@ def get_loader_miccai(fold):
     test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
 
 
-
-    mri_dataset_train = MICCAI_Dataset(train_ids[:1] if config.USE_ONE_SAMPLE is True else train_ids, train=True);
-    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
-    mri_dataset_test = MICCAI_Dataset(test_ids[:1] if config.USE_ONE_SAMPLE is True else test_ids, train=False);
-    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=config.hyperparameters['num_workers'], pin_memory=True);
+    mri_dataset_train = MICCAI_Dataset(args, train_ids[:5], train=True);
+    train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=args.num_workers, pin_memory=True);
+    mri_dataset_test = MICCAI_Dataset(args, test_ids[:5], train=False);
+    test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=args.num_workers, pin_memory=True);
 
     return train_loader, test_loader, mri_dataset_test; 
 
-def standardize(img):
-    img = img - np.min(img);
-    img = (img / np.max(img))*255;
-    return img;
-
-def standardize(img):
-    img = img - np.min(img);
-    img = (img / np.max(img))*255;
-    return img;
-
 def visualize_2d(images, slice,):
-    # if size is not None:
-    #     res = Resize(size);
-    #     mri_ret = res(mri.unsqueeze(dim=0));
-    #     mri_ret = mri_ret.numpy().squeeze();
+    """display one slice of an MRI scan, for debugging purposes
+
+        Parameters
+        ----------
+        args : dict
+            arguments.
+    """
     fig, ax = plt.subplots(len(images),3);
     for i,img in enumerate(images):
         img = img.squeeze();
@@ -852,8 +715,26 @@ def visualize_2d(images, slice,):
         ax[i][2].imshow(img[:,:,slice[2]], cmap='gray');
     plt.show()
 
-def inpaint_3d(img, mask_g, num_corrupted_patches):
-    
+def inpaint_3d(img, 
+               mask_g, 
+               num_corrupted_patches, 
+               deterministic = False):
+    """remove part of an MRI scan for self-superivsed pretraining model
+
+        Parameters
+        ----------
+        img : np.ndarray
+            MRI scan patch
+
+        mask_g : np.ndarray
+            mask to take inpainting centers from
+
+        num_corrupted_patches : int
+            number of patches to curropt
+
+        deterministic : bool
+            if true, every call to this function yields the same results.
+    """
     mri = img;
 
     _,h,w,d = mri.shape;
@@ -861,9 +742,9 @@ def inpaint_3d(img, mask_g, num_corrupted_patches):
     cubes = [];
     for n in range(num_corrupted_patches):
         mask_cpy = deepcopy(mask_g);
-        size_x = np.random.randint(5,15) if config.hyperparameters['deterministic'] is False else 15;
-        size_y = np.random.randint(5,20) if config.hyperparameters['deterministic'] is False else 15;
-        size_z = np.random.randint(5,20) if config.hyperparameters['deterministic'] is False else 15;
+        size_x = np.random.randint(5,15) if deterministic is False else 15;
+        size_y = np.random.randint(5,20) if deterministic is False else 15;
+        size_z = np.random.randint(5,20) if deterministic is False else 15;
         mask_cpy[:,:,:,d-size_z:] = 0;
         mask_cpy[:,:,:,:size_z+1] = 0;
         mask_cpy[:,:,w-size_y:,:] = 0;
@@ -872,7 +753,7 @@ def inpaint_3d(img, mask_g, num_corrupted_patches):
         mask_cpy[:,:size_x+1,:,:] = 0;
         pos_cords = np.where(mask_cpy==1);
 
-        if config.hyperparameters['deterministic'] is False:
+        if deterministic is False:
             if len(pos_cords[0]) != 0:
                 r = np.random.randint(0,len(pos_cords[0]));
                 center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
@@ -883,7 +764,6 @@ def inpaint_3d(img, mask_g, num_corrupted_patches):
         
         cubes.append([center, size_x, size_y, size_z]);
     
- 
     #shape
     cube = np.zeros((1,h,w,d), dtype=np.uint8);
     for c in cubes:
@@ -907,16 +787,30 @@ def inpaint_3d(img, mask_g, num_corrupted_patches):
     #visualize_2d(mri_after, cube_thresh, slice=center[0:]);
     return mri_after, cube_thresh, noise, center;
 
-def add_synthetic_lesion_wm(img, mask_g):
-    
+def add_synthetic_lesion_wm(img, 
+                            mask_g, 
+                            deterministic):
+    """adds synthetic lesions to the MRI scan
+
+        Parameters
+        ----------
+        img : np.ndarray
+            MRI scan patch
+
+        mask_g : np.ndarray
+            mask to take inpainting centers from
+
+        deterministic : bool
+            if true, every call to this function yields the same results.
+    """
     mri = img;
 
     _,h,w,d = mri.shape;
 
     mask_cpy = deepcopy(mask_g);
-    size_x = np.random.randint(2,6) if config.hyperparameters['deterministic'] is False else 3;
-    size_y = size_x - np.random.randint(0,size_x-1) if config.hyperparameters['deterministic'] is False else 3;
-    size_z = size_x - np.random.randint(0,size_x-1) if config.hyperparameters['deterministic'] is False else 3;
+    size_x = np.random.randint(2,6) if deterministic is False else 3;
+    size_y = size_x - np.random.randint(0,size_x-1) if deterministic is False else 3;
+    size_z = size_x - np.random.randint(0,size_x-1) if deterministic is False else 3;
     mask_cpy[:,:,:,d-size_z:] = 0;
     mask_cpy[:,:,:,:size_z+1] = 0;
     mask_cpy[:,:,w-size_y:,:] = 0;
@@ -925,7 +819,7 @@ def add_synthetic_lesion_wm(img, mask_g):
     mask_cpy[:,:size_x+1,:,:] = 0;
     pos_cords = np.where(mask_cpy==1);
 
-    if config.hyperparameters['deterministic'] is False:
+    if deterministic is False:
         if len(pos_cords[0]) != 0:
             r = np.random.randint(0,len(pos_cords[0]));
             center = [pos_cords[1][r], pos_cords[2][r],pos_cords[3][r]]
@@ -943,7 +837,6 @@ def add_synthetic_lesion_wm(img, mask_g):
     cube[:,max(center[0]-size_x,0):min(center[0]+size_x, h), max(center[1]-size_y,0):min(center[1]+size_y,w), max(center[2]-size_z,0):min(center[2]+size_z,d)] = 1;
     cube = cube * mask_g;
 
-    #var = np.random.uniform(1.0,1.2);
     cube = GaussianSmooth(1.2, approx='erf')(cube);
     cube = cube / (torch.max(cube) + 1e-4);
     #================
@@ -952,195 +845,4 @@ def add_synthetic_lesion_wm(img, mask_g):
     final = (cube)*(noise);
     mri_after = (1-cube)*mri + final;
     
-    
-    #noise = GaussianSmooth(7)(mask_g.float());
-    #mri_after = torch.clip(mri_after, 0, 1);
-    #mri_after = (mri_after*255).astype("uint8")
-    #visualize_2d(mri_after, cube_thresh, slice=center[0:]);
     return mri_after, cube;
-
-def cache_mri_gradients():
-    patient_ids = glob(os.path.join('miccai-processed/*/'));
-    for p in tqdm(patient_ids):
-        patient_path = os.path.join(p, 'flair_time01_on_middle_space.nii.gz');
-
-        file_name = os.path.basename(patient_path);
-        file_name = file_name[:file_name.find('.')];
-        mrimage = nib.load(patient_path)
-        mrimage = mrimage.get_fdata()
-        mrimage = window_center_adjustment(mrimage);
-        mrimage = mrimage / np.max(mrimage);
-        g = sobel(mrimage);
-        g = g < threshold_otsu(g);
-        pickle.dump(g, open(os.path.join(p, f'flair_time01_on_middle_space.gradient'), 'wb'));
-
-        patient_path = os.path.join(p, 'flair_time02_on_middle_space.nii.gz');
-
-        file_name = os.path.basename(patient_path);
-        file_name = file_name[:file_name.find('.')];
-        mrimage = nib.load(patient_path)
-        mrimage = mrimage.get_fdata()
-        mrimage = window_center_adjustment(mrimage);
-        mrimage = mrimage / np.max(mrimage);
-        g = sobel(mrimage);
-        g = g < threshold_otsu(g);
-        pickle.dump(g, open(os.path.join(p, f'flair_time02_on_middle_space.gradient'), 'wb'));
-
-
-def gradient(mri):
-    kernel1 = np.concatenate([np.ones((1, 3,3)), np.zeros((1, 3,3)), np.ones((1, 3,3))*-1], axis=0);
-    kernel2 = np.concatenate([np.ones((3,1,3)), np.zeros((3,1,3)), np.ones((3,1,3))*-1], axis=1);
-    kernel3 = np.concatenate([np.ones((3,3,1)), np.zeros((3,3,1)), np.ones((3,3,1))*-1], axis=2);
-
-
-    img1 = convolve(mri, kernel1)
-    img2 = convolve(mri, kernel2)
-    img3 = convolve(mri, kernel3)
-    ret = np.sqrt(img1**2 + img2**2 + img3**2);
-    return ret;
-
-def predict_on_miccai(base_path, model):
-
-    normalize_internsity = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
-    def preprocess(mrimage):
-        mask = mrimage > threshold_otsu(mrimage);
-        mask = np.expand_dims(mask, axis=0);
-        mrimage = mrimage / (np.max(mrimage)+1e-4);
-        return mrimage, mask; 
-
-    counter = 0;
-    with torch.no_grad():
-        gt_path = os.path.join(base_path,"ground_truth.nii.gz");
-        brainmask_path = os.path.join(base_path, "brain_mask.nii.gz");
-
-        first_mri_path = os.path.join(base_path, 'flair_time01_on_middle_space.nii.gz');
-        second_mri_path = os.path.join(base_path, 'flair_time02_on_middle_space.nii.gz');
-
-        mri1 = nib.load(first_mri_path)
-        mri2 = nib.load(second_mri_path)
-        gt_image_nib = nib.load(gt_path)
-        brainmask_image_nib = nib.load(brainmask_path)
-
-
-        mri1 = mri1.get_fdata()
-        mri2 = mri2.get_fdata()
-        gt = gt_image_nib.get_fdata();
-        brainmask = brainmask_image_nib.get_fdata();
-
-        gt = gt*brainmask;
-
-
-        mri1 = window_center_adjustment(mri1);
-        mri2 = window_center_adjustment(mri2);
-
-        mri1, fixed_image_data_mask = preprocess(mri1);
-        mri2, rigid_registered_image_data_mask = preprocess(mri2);
-
-
-        w,h,d = mri1.shape;
-        new_w = math.ceil(w / config.hyperparameters['crop_size_w']) * config.hyperparameters['crop_size_w'];
-        new_h = math.ceil(h / config.hyperparameters['crop_size_h']) * config.hyperparameters['crop_size_h'];
-        new_d = math.ceil(d / config.hyperparameters['crop_size_d']) * config.hyperparameters['crop_size_d'];
-
-        mri1_padded  = np.zeros((new_w, new_h, new_d), dtype = mri1.dtype);
-        mri2_padded  = np.zeros((new_w, new_h, new_d), dtype = mri2.dtype);
-        gt_padded  = np.zeros((new_w, new_h, new_d), dtype = gt.dtype);
-        brainmask_padded  = np.zeros((new_w, new_h, new_d), dtype = brainmask.dtype);
-
-        mri1_padded[:w,:h,:d] = mri1;
-        mri2_padded[:w,:h,:d] = mri2;
-        gt_padded[:w,:h,:d] = gt;
-        brainmask_padded[:w,:h,:d] = brainmask;
-
-        step_w, step_h, step_d = config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d'];
-        mri1_patches = patchify(mri1_padded, 
-                                            (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
-                                            (step_w, step_h, step_d));
-        mri2_patches = patchify(mri2_padded, 
-                                            (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
-                                            (step_w, step_h, step_d));
-        gt_patches = patchify(gt_padded, 
-                                            (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
-                                            (step_w, step_h, step_d));
-        brainmask_patches = patchify(brainmask_padded, 
-                                            (config.hyperparameters['crop_size_w'], config.hyperparameters['crop_size_h'], config.hyperparameters['crop_size_d']), 
-                                            (step_w, step_h, step_d));
-
-        
-        predicted_aggregated = np.zeros((new_w, new_h, new_d), dtype = np.int32);
-        predicted_aggregated_count = np.zeros((new_w, new_h, new_d), dtype = np.int32);
-        # # data = [];
-        # for i in range(mri2_patches.shape[0]):
-        #     if np.sum(mri1_patches[i]) != 0 and np.sum(mri2_patches[i]) != 0:
-        #         data.append((mri1_patches[i],mri2_patches[i],gt_patches[i], 0 if np.sum(gt_patches[i]) == 0 else 1, brainmask_patches[i]))
-
-        # return data;
-        total_pred = [];
-        for i in range(mri1_patches.shape[0]):
-            for j in range(mri1_patches.shape[1]):
-                for k in range(mri1_patches.shape[2]):
-            #         #trans_ret = crop({'image1': fixed_image_data, 'image2': rigid_registered_image_data, 'mask1': fixed_image_data_mask, 'mask2': rigid_registered_image_data_mask});
-            #         if np.sum(mri1_patches[i,j,k,:,:,:]) != 0 and np.sum(mri2_patches[i,j,k,:,:,:]) != 0:
-                        
-                    
-            # mri1_patches_trans = torch.from_numpy(mri1_patches[i,j,k,:,:,:]);
-            # mri2_patches_trans = torch.from_numpy(mri2_patches[i,j,k,:,:,:]);
-            # gt_lbl = 0 if np.sum(gt_patches[i,j,k,:,:,:]) == 0 else 1;
-            # heatmap = torch.from_numpy(gt_patches[i,j,k,:,:,:]);
-            # brainmask = torch.from_numpy(brainmask_patches[i,j,k,:,:,:]).to('cuda');
-
-            # mri1_patches_trans = normalize_internsity(mri1_patches_trans);
-
-            # #mri2_c = self.augment_noisy_image(mri2_c);
-            # mri2_patches_trans = normalize_internsity(mri2_patches_trans);
-
-                    mri1, mri2, ret_gt, gt_lbl, brainmask = mri1_patches[i,j,k,:,:,:], mri2_patches[i,j,k,:,:,:], gt_patches[i,j,k,:,:,:], 0 if np.sum(gt_patches[i,j,k,:,:,:]) == 0 else 1, brainmask_patches[i,j,k,:,:,:];
-
-                    mri1 = np.expand_dims(mri1, axis=0);
-                    mri2 = np.expand_dims(mri2, axis=0);
-                    ret_gt = np.expand_dims(ret_gt, axis=0);
-
-                    ret_mri1 = normalize_internsity(mri1);
-                    ret_mri2 = normalize_internsity(mri2);
-
-                    ret_gt = torch.from_numpy(ret_gt).to('cuda').unsqueeze(dim=0)
-                    brainmask = torch.from_numpy(brainmask).to('cuda');
-
-                    
-
-                    mri, mri_noisy = ret_mri1.to('cuda').unsqueeze(dim=0), ret_mri2.to('cuda').unsqueeze(dim=0);
-                    #mri_mask, mri_noisy_mask = fixed_image_data_mask_trans.to('cuda'), rigid_registered_image_data_mask_trans.to('cuda');
-                    hm1 = model(mri, mri_noisy);
-                    hm2 = model(mri_noisy, mri);
-                    pred_lbl_1 = torch.sigmoid(hm1)>0.5;
-                    pred_lbl_2 = torch.sigmoid(hm2)>0.5;
-                    pred = pred_lbl_1 * pred_lbl_2 * brainmask;
-
-                    # s = torch.sum(pred);
-
-                    # #gt_lbl = torch.sum(pred).item()>0;
-                    # if gt_lbl == 1:
-                    #     dice = DiceLoss()(pred, ret_gt);
-                    #     total_dice.append(dice.item());
-                    # if gt_lbl ==0 and s > 0:
-                    #     print('a');
-                    
-                    hm1 = hm1.detach().cpu().numpy();
-                    hm2 = hm2.detach().cpu().numpy();
-                    mri = mri.detach().cpu().numpy();
-                    mri_noisy = mri_noisy.detach().cpu().numpy();
-
-                    predicted_aggregated[i*step_w:i*step_w + config.hyperparameters['crop_size_w'], 
-                                j*step_h:(j)*step_h + config.hyperparameters['crop_size_h'], 
-                                k*step_d:(k)*step_d + config.hyperparameters['crop_size_d']] += np.array(pred.squeeze().detach().cpu().numpy()).astype("int32");
-            
-                    predicted_aggregated_count[i*step_w:i*step_w + config.hyperparameters['crop_size_w'], 
-                                j*step_h:(j)*step_h + config.hyperparameters['crop_size_h'], 
-                                k*step_d:(k)*step_d + config.hyperparameters['crop_size_d']] += np.ones((config.hyperparameters['crop_size_w'], 
-                                                                                                        config.hyperparameters['crop_size_h'], 
-                                                                                                        config.hyperparameters['crop_size_d']), dtype=np.int32);
-               
-   
-    final_pred = torch.from_numpy(predicted_aggregated);
-    gt_padded = torch.from_numpy(gt_padded)
-    return final_pred.unsqueeze(0).unsqueeze(0), gt_padded.unsqueeze(0).unsqueeze(0);
