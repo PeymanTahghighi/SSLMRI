@@ -692,9 +692,9 @@ def get_loader_miccai(args, fold):
     test_ids = [os.path.join('miccai-processed', t) for t in test_ids];
 
 
-    mri_dataset_train = MICCAI_Dataset(args, train_ids[:5], train=True);
+    mri_dataset_train = MICCAI_Dataset(args, train_ids, train=True);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=args.num_workers, pin_memory=True);
-    mri_dataset_test = MICCAI_Dataset(args, test_ids[:5], train=False);
+    mri_dataset_test = MICCAI_Dataset(args, test_ids, train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=args.num_workers, pin_memory=True);
 
     return train_loader, test_loader, mri_dataset_test; 
