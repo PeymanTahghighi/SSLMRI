@@ -39,4 +39,6 @@ To create a gif from the prediction of the model, run:
 ```
 python test.py --segmentation --gif
 ```
-
+Solarized dark             |  Solarized Ocean
+:-------------------------:|:-------------------------:
+![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_1.png)  |  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_2.png)
