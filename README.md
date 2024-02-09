@@ -5,7 +5,7 @@ Here, our model detects all the changes from one MRI scan to the other. The firs
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Example2.gif)
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Example3.gif)
 ### Synthetic lesions
-Here you can see exampes of synthetic lesions added to MRI scans.
+Here, you can see examples of synthetic lesions added to MRI scans. The first column shows the original MRI scan patch before adding a synthetic lesion. The second column shows an MRI scan after adding a synthetic lesion. The third column shows the mask of the added lesion to the original MRI scan patch.
 Original MRI Patch             |  MRI patch with added lesion | Mask
 :-------------------------:|:-------------------------:|:-------------------------:
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_1.png)  |  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_2.png)|  ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/New%20lesions/1_3.png) 
