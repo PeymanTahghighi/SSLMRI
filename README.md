@@ -31,5 +31,12 @@ To get same results are the paper first download [models](https://uofc-my.sharep
 python test.py
 ```
 #### Detecting all changes
-
+First download [samples](https://uofc-my.sharepoint.com/:f:/g/personal/peyman_tahghighi_ucalgary_ca/EkY72iGdbaRDlyYe8-yNzpQBwlVahqmmn-EjkFdEmY2cKQ?e=LV7nVG) and put them in the root folder. Then to see all the slices using matplotlib library use:
+```
+python test.py --segmentation
+```
+To create a gif from the prediction of the model, run:
+```
+python test.py --segmentation --gif
+```
 
