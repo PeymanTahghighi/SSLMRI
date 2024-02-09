@@ -1,9 +1,9 @@
 ## Examples
 ### Detecting all changes
 Here, our model detects all the changes from one MRI scan to the other. The first column represents the first MRI scan, and the second represents the second MRI scan. The third column indicates changes from the first MRI (first column) to the second MRI (second column). Blue regions indicate parts that have been removed from the first MRI to the second, and red regions show the parts that have been added from the first MRI to the second. Note that some of the changes were added programmatically for illustration purposes only.
-![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Example1.gif)
-![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Example2.gif)
-![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Example3.gif)
+![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/changes/Example1.gif)
+![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/changes/Example2.gif)
+![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/changes/Example3.gif)
 ### Synthetic lesions
 Here, you can see examples of synthetic lesions added to MRI scans. The first column shows the original MRI scan patch before adding a synthetic lesion. The second column shows an MRI scan after adding a synthetic lesion. The third column shows the mask of the added lesion to the original MRI scan patch.
 Original MRI Patch             |  MRI patch with added lesion | Mask
