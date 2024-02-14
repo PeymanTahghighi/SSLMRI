@@ -32,7 +32,7 @@ def save_examples_miccai(model, loader,):
         pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         counter = 0;
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap, lbl, brainmask = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3], batch[4].to('cuda');
+            mri, mri_noisy, heatmap, lbl, brainmask = batch[0].to(args.device), batch[1].to(args.device), batch[2].to(args.device), batch[3], batch[4].to(args.device);
             if torch.sum(heatmap).item() > 0:
                 hm1 = model(mri, mri_noisy);
                 hm2 = model(mri_noisy, mri);
@@ -93,7 +93,7 @@ def save_examples(model, loader,):
         pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
         counter = 0;
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=0), batch[1].to('cuda').unsqueeze(dim=0), batch[2].to('cuda');
+            mri, mri_noisy, heatmap = batch[0].to(args.device).unsqueeze(dim=0), batch[1].to(args.device).unsqueeze(dim=0), batch[2].to(args.device);
             volume_batch1 = torch.cat([mri, mri_noisy, mri - mri_noisy], dim=1)
             volume_batch2 = torch.cat([mri_noisy, mri, mri_noisy - mri], dim=1)
             hm1 = model(volume_batch1);
@@ -171,7 +171,7 @@ def train_miccai(args, model, train_loader, optimizer, scalar):
     curr_step = 0;
     curr_iou = 0;
     for batch_idx, (batch) in pbar:
-        mri, mri_noisy, heatmap, distance_transform = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(dim=0),batch[3].to('cuda').squeeze(dim=0)
+        mri, mri_noisy, heatmap, distance_transform = batch[0].to(args.device).squeeze().unsqueeze(dim=1), batch[1].to(args.device).squeeze().unsqueeze(dim=1), batch[2].to(args.device).squeeze(dim=0),batch[3].to(args.device).squeeze(dim=0)
 
         steps = args.sample_per_mri // args.batch_size;
         curr_loss = 0;
@@ -242,7 +242,7 @@ def train_miccai_pretrain(args, model, train_loader, optimizer, scalar):
     curr_step = 0;
     curr_iou = 0;
     for batch_idx, (batch) in pbar:
-        mri, mri_noisy, heatmap = batch[0].to('cuda').squeeze().unsqueeze(dim=1), batch[1].to('cuda').squeeze().unsqueeze(dim=1), batch[2].to('cuda').squeeze(0)
+        mri, mri_noisy, heatmap = batch[0].to(args.device).squeeze().unsqueeze(dim=1), batch[1].to(args.device).squeeze().unsqueeze(dim=1), batch[2].to(args.device).squeeze(0)
         steps = args.sample_per_mri // args.batch_size;
         curr_loss = 0;
         for s in range(steps):
@@ -302,7 +302,7 @@ def valid_miccai(args, model, loader, dataset):
     pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     with torch.no_grad():
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap, brainmask, patient_id, loc = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].to('cuda'), batch[4], batch[5];
+            mri, mri_noisy, heatmap, brainmask, patient_id, loc = batch[0].to(args.device), batch[1].to(args.device), batch[2].to(args.device), batch[3].to(args.device), batch[4], batch[5];
 
             volume_batch1 = torch.cat([mri, mri_noisy, mri - mri_noisy], dim=1)
             volume_batch2 = torch.cat([mri_noisy, mri, mri_noisy - mri], dim=1)
@@ -335,7 +335,7 @@ def valid_pretrain_miccai(args, model, loader):
     epoch_loss = [];
     with torch.no_grad():
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap = batch[0].to('cuda').unsqueeze(dim=1), batch[1].to('cuda').unsqueeze(dim=1), batch[2].to('cuda')
+            mri, mri_noisy, heatmap = batch[0].to(args.device).unsqueeze(dim=1), batch[1].to(args.device).unsqueeze(dim=1), batch[2].to(args.device)
             volume_batch1 = torch.cat([mri, mri_noisy, mri - mri_noisy], dim=1)
             volume_batch2 = torch.cat([mri_noisy, mri, mri_noisy - mri], dim=1)
             hm1 = model(volume_batch1);
@@ -384,15 +384,15 @@ if __name__ == "__main__":
 
     if args.pretraining:
         if args.network == 'VNET':
-            model = VNet(model_type='pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+            model = VNet(model_type='pretraining', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).to(args.device)
         else:
-            model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
+            model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to(args.device)
         EXP_NAME = f"Pretraining Miccai-16-Net={args.network}";
     else:
         if args.network == 'VNET':
             model = VNet(model_type='segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
         else:
-            model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to('cuda')
+            model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to(args.device)
             ckpt = torch.load('pretrained/swin/model_swinvit.pt');
             model.load_from(ckpt)
 
@@ -409,7 +409,7 @@ if __name__ == "__main__":
         ckpt = torch.load(os.path.join('exp', EXP_NAME, 'resume.ckpt'));
         model.load_state_dict(ckpt['model']);
 
-    model.to('cuda');
+    model.to(args.device);
     scalar = torch.cuda.amp.grad_scaler.GradScaler();
     optimizer = optim.AdamW(model.parameters(), lr = args.learning_rate);
 

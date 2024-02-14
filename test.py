@@ -42,7 +42,7 @@ def valid(model, loader, dataset):
     pbar = tqdm(enumerate(loader), total= len(loader), bar_format='{l_bar}{bar:10}{r_bar}{bar:-10b}')
     with torch.no_grad():
         for idx, (batch) in pbar:
-            mri, mri_noisy, heatmap, brainmask, patient_id, loc = batch[0].to('cuda'), batch[1].to('cuda'), batch[2].to('cuda'), batch[3].to('cuda'), batch[4], batch[5];
+            mri, mri_noisy, heatmap, brainmask, patient_id, loc = batch[0].to(args.device), batch[1].to(args.device), batch[2].to(args.device), batch[3].to(args.device), batch[4], batch[5];
             volume_batch1 = torch.cat([mri, mri_noisy, mri - mri_noisy], dim=1)
             volume_batch2 = torch.cat([mri_noisy, mri, mri_noisy - mri], dim=1)
             hm1 = model(volume_batch1);
@@ -54,90 +54,6 @@ def valid(model, loader, dataset):
     
     res = dataset.calculate_metrics(simple = False);
     return res;
-
-
-
-    registration_method = sitk.ImageRegistrationMethod()
-
-    # Set the similarity metric
-    registration_method.SetMetricAsMeanSquares()
-
-    # Set the optimizer
-    registration_method.SetOptimizerAsRegularStepGradientDescent(learningRate=2.0, minStep=1e-4, numberOfIterations=100)
-
-    # Set the initial transformation to identity
-    initial_transform = sitk.TranslationTransform(fixed_image.GetDimension())
-    registration_method.SetInitialTransform(initial_transform)
-
-    # Perform the registration
-    final_transform = registration_method.Execute(fixed_image, moving_image)
-
-    # Transform the moving image
-    registered_image = sitk.Resample(moving_image, fixed_image, final_transform, sitk.sitkLinear, 0.0, moving_image.GetPixelID())
-    return registered_image, final_transform
-
-
-    fixed_path = first_mri_path
-    moving_path = second_mri_path
-
-
-    fixed_image_nib = nib.load(fixed_path)
-    moving_image_nib = nib.load(moving_path)
-
-    fixed_image_data = fixed_image_nib.get_fdata()
-    moving_image_data = moving_image_nib.get_fdata()
-
-    target_spacing = (1.0, 1.0, 1.0)
-
-    fixed_image_data = load_and_resample_nii_image(fixed_image_nib, fixed_image_data, target_spacing)
-    moving_image_data = load_and_resample_nii_image(moving_image_nib, moving_image_data, target_spacing)
-
-    fixed_sitk = sitk.GetImageFromArray(fixed_image_data)
-    moving_sitk = sitk.GetImageFromArray(moving_image_data)
-
-    # We perform the histogram matching
-    matched_moving_sitk = histogram_match(moving_sitk, fixed_sitk)
-
-    # We convert the matched image back to numpy array
-    matched_moving_image_data = sitk.GetArrayFromImage(matched_moving_sitk)
-
-    rigid_registered_image, rigid_transform = rigid_registration(fixed_sitk, matched_moving_sitk)
-    rigid_registered_image_data = sitk.GetArrayFromImage(rigid_registered_image)
-
-    fixed_image_data = window_center_adjustment(fixed_image_data);
-    rigid_registered_image_data = window_center_adjustment(rigid_registered_image_data);
-    r = np.random.randint(fixed_image_data.shape[0]);
-    one = fixed_image_data[r,:,:];
-    one = cv2.resize(one, (512,512));
-    
-    two = rigid_registered_image_data[r,:,:];
-    two = cv2.resize(two, (512,512));
-
-    diff = two - one;
-
-    transforms = A.Compose([A.Normalize(0.5, 0.5), ToTensorV2()]);
-    one = transforms(image = one)['image'];
-    two = transforms(image = two)['image'];
-
-    mri, mri_noisy = one.to('cuda').unsqueeze(dim=1), two.to('cuda').unsqueeze(dim=1);
-    hm1 = model(mri, mri_noisy);
-    hm2 = model(mri_noisy, mri);
-    hm1 = hm1;
-    mri_noisy = mri_noisy;
-    hm1_np = hm2.permute(0,2,3,1).cpu().detach().numpy().squeeze()
-    mri_noisy = mri_noisy.permute(0,2,3,1).cpu().detach().numpy().squeeze()
-    mri = mri.permute(0,2,3,1).cpu().detach().numpy().squeeze()
-    mri = mri * 0.5 + 0.5;
-    #mri_noisy = mri * 0.5 + 0.5;
-    mri_noisy_rec = mri_noisy + hm1_np;
-    #hm1_np = hm1_np > 0;
-    fig, ax = plt.subplots(1,5);
-    ax[0].imshow(mri, cmap='gray');
-    ax[1].imshow(mri_noisy, cmap='gray');
-    ax[4].imshow(mri_noisy_rec, cmap='gray');
-    ax[2].imshow(hm1_np, cmap='hot');
-    ax[3].imshow(diff);
-    plt.show();
     
 def normalize(img):
     """normalize the range of given image between [0,1]
@@ -335,7 +251,7 @@ def predict_on_mri_3d(args, model, use_cached = False):
                         second_mri_data_trans = torch.from_numpy(second_mri_data_patches[i,j,k,:,:,:]);
                         brainmask_crop = torch.from_numpy(brainmask_data_patches[i,j,k,:,:,:]);
 
-                        mri, mri_noisy, brainmask_crop = first_mri_data_trans.to('cuda').unsqueeze(dim=0).unsqueeze(dim=0), second_mri_data_trans.to('cuda').unsqueeze(dim=0).unsqueeze(dim=0), brainmask_crop.to('cuda');
+                        mri, mri_noisy, brainmask_crop = first_mri_data_trans.to(args.device).unsqueeze(dim=0).unsqueeze(dim=0), second_mri_data_trans.to(args.device).unsqueeze(dim=0).unsqueeze(dim=0), brainmask_crop.to(args.device);
                         volume_batch1 = torch.cat([mri, mri_noisy, mri - mri_noisy], dim=1)
                         volume_batch2 = torch.cat([mri_noisy, mri, mri_noisy - mri], dim=1)
                        

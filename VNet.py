@@ -1,6 +1,9 @@
 import torch
 from torch import nn
 
+"""
+    modified version of https://github.com/ycwu1997/CoactSeg
+"""
 
 class ConvBlock(nn.Module):
     def __init__(self, n_stages, n_filters_in, n_filters_out, normalization='none'):
@@ -271,7 +274,7 @@ class SSLHead(nn.Module):
         return out;
         
 class VNet(nn.Module):
-    def __init__(self, model_type, n_channels=3, n_classes=2, n_filters=16, normalization='none', has_dropout=False, has_residual=False):
+    def __init__(self, model_type, n_channels=3, n_classes=1, n_filters=16, normalization='none', has_dropout=False, has_residual=False):
         super(VNet, self).__init__()
 
         self.encoder = Encoder(n_channels, n_classes, n_filters, normalization, has_dropout, has_residual)
@@ -291,19 +294,10 @@ class VNet(nn.Module):
         out = self.ssl_head(features);
         return out;
     
-
+def test():
+    model = VNet(model_type='pretraining', n_channels=3, n_classes=2, normalization='batchnorm', has_dropout=True);
+    inp = torch.rand((2, 3, 256, 256, 256));
+    model(inp);
 if __name__ == '__main__':
-    # compute FLOPS & PARAMETERS
-    from ptflops import get_model_complexity_info
-    model = VNet(model_type='pretraining', n_channels=3, n_classes=2, normalization='batchnorm', has_dropout=True, has_residual=True)
-    with torch.cuda.device(0):
-      macs, params = get_model_complexity_info(model, (3, 96, 96, 96), as_strings=True,
-                                               print_per_layer_stat=True, verbose=True)
-      print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
-      print('{:<30}  {:<8}'.format('Number of parameters: ', params))
-    with torch.cuda.device(0):
-      macs, params = get_model_complexity_info(model, (3, 80, 80, 80), as_strings=True,
-                                               print_per_layer_stat=True, verbose=True)
-      print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
-      print('{:<30}  {:<8}'.format('Number of parameters: ', params))
-    import ipdb; ipdb.set_trace()
+    test();
+    
