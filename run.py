@@ -390,7 +390,7 @@ if __name__ == "__main__":
         EXP_NAME = f"Pretraining Miccai-16-Net={args.network}";
     else:
         if args.network == 'VNET':
-            model = VNet(model_type='segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).cuda()
+            model = VNet(model_type='segmentation', n_channels=3, n_classes=1, normalization='batchnorm', has_dropout=True).to(args.device)
         else:
             model = SwinUNETR(img_size=(96,96,96), spatial_dims=3, in_channels=3, out_channels=1, feature_size=48).to(args.device)
             ckpt = torch.load('pretrained/swin/model_swinvit.pt');
