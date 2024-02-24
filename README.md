@@ -2,6 +2,7 @@
 ### Self-supervised pre-training results
 Here, outputs of the self-supervised pre-training are shown, which highlights changes from one MRI scan to the other. Note that we did not quantify this in our paper, and it is only based on the observation. We did not claim this in the paper.
 The first column represents the first MRI scan, and the second represents the second MRI scan. The third column indicates changes from the first MRI (first column) to the second MRI (second column). Blue regions indicate parts that have been removed from the first MRI to the second, and red regions show the parts that have been added from the first MRI to the second. Note that some of the changes were added programmatically for illustration purposes only.
+
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/changes/Example1.gif)
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/changes/Example2.gif)
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/changes/Example3.gif)
