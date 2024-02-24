@@ -1,6 +1,7 @@
 ## Examples
-### Detecting all changes
-Here, our model detects all the changes from one MRI scan to the other. The first column represents the first MRI scan, and the second represents the second MRI scan. The third column indicates changes from the first MRI (first column) to the second MRI (second column). Blue regions indicate parts that have been removed from the first MRI to the second, and red regions show the parts that have been added from the first MRI to the second. Note that some of the changes were added programmatically for illustration purposes only.
+### Self-supervised pre-training results
+Here, outputs of the self-supervised pre-training are shown, which highlights changes from one MRI scan to the other. Note that we did not quantify this in our paper, and it is only based on the observation. We did not claim this in the paper.
+The first column represents the first MRI scan, and the second represents the second MRI scan. The third column indicates changes from the first MRI (first column) to the second MRI (second column). Blue regions indicate parts that have been removed from the first MRI to the second, and red regions show the parts that have been added from the first MRI to the second. Note that some of the changes were added programmatically for illustration purposes only.
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/changes/Example1.gif)
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/changes/Example2.gif)
 ![](https://github.com/PeymanTahghighi/SSLMRI/blob/master/Examples/changes/Example3.gif)
@@ -34,8 +35,8 @@ To get same results are the paper first download [models](https://uofc-my.sharep
 ```
 python test.py
 ```
-#### Detecting all changes
-First download [samples](https://uofc-my.sharepoint.com/:f:/g/personal/peyman_tahghighi_ucalgary_ca/EkY72iGdbaRDlyYe8-yNzpQBwlVahqmmn-EjkFdEmY2cKQ?e=LV7nVG) and put them in the root folder. Then to see all the slices using matplotlib library use:
+#### Outputs of self-supervised pre-training
+First download [samples](https://uofc-my.sharepoint.com/:f:/g/personal/peyman_tahghighi_ucalgary_ca/EkY72iGdbaRDlyYe8-yNzpQBwlVahqmmn-EjkFdEmY2cKQ?e=LV7nVG) and put them in the root folder. Then to visualize the outputs using matplotlib library use:
 ```
 python test.py --segmentation
 ```
