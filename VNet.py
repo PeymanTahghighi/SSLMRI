@@ -2,7 +2,8 @@ import torch
 from torch import nn
 
 """
-    modified version of https://github.com/ycwu1997/CoactSeg
+    modified version from Wu, Yicheng, et al. "Coactseg: Learning from heterogeneous data for new multiple sclerosis lesion segmentation." 
+    International conference on medical image computing and computer-assisted intervention. Cham: Springer Nature Switzerland, 2023.
 """
 
 class ConvBlock(nn.Module):
