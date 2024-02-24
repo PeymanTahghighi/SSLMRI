@@ -31,7 +31,7 @@ python run.py
 ```
 ### Testing
 #### New lesion segmentation
-To get same results are the paper first download [models](https://file.io/UpbScC3SGNXf), place them in root folder, then run
+To get same results are the paper first download [models](https://file.io/cS1dZg25VqlW), place them in root folder, then run
 ```
 python test.py
 ```
