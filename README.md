@@ -31,12 +31,12 @@ python run.py
 ```
 ### Testing
 #### New lesion segmentation
-To get same results are the paper first download [models](https://uofc-my.sharepoint.com/:f:/g/personal/peyman_tahghighi_ucalgary_ca/EjIxxA6_anpHr9L4RaX9lssB_yTIMH5AnPBPyxr09LhBwA?e=Au8FPr), place them in root folder, then run
+To get same results are the paper first download [models](https://file.io/UpbScC3SGNXf), place them in root folder, then run
 ```
 python test.py
 ```
 #### Outputs of self-supervised pre-training
-First download [samples](https://uofc-my.sharepoint.com/:f:/g/personal/peyman_tahghighi_ucalgary_ca/EkY72iGdbaRDlyYe8-yNzpQBwlVahqmmn-EjkFdEmY2cKQ?e=LV7nVG) and put them in the root folder. Then to visualize the outputs using matplotlib library use:
+First download [samples](https://file.io/dFi2Br52YfH6) and put them in the root folder. Then to visualize the outputs using matplotlib library use:
 ```
 python test.py --segmentation
 ```
