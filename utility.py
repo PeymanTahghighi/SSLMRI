@@ -1,5 +1,6 @@
 """
-    Taken from https://github.com/ycwu1997/CoactSeg
+    Taken from Wu, Yicheng, et al. "Coactseg: Learning from heterogeneous data for new multiple sclerosis lesion segmentation." 
+    International conference on medical image computing and computer-assisted intervention. Cham: Springer Nature Switzerland, 2023.
 """
 import torch
 import numpy as np
