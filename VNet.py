@@ -249,29 +249,29 @@ class SSLHead(nn.Module):
             UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
         )
 
-        self.second_upsample = nn.Sequential(
-            UpSampling(n_fiters*8, n_fiters*4, normalization='instancenorm'),
-            UpSampling(n_fiters*4, n_fiters*2, normalization='instancenorm'),
-            UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
-        )
+        # self.second_upsample = nn.Sequential(
+        #     UpSampling(n_fiters*8, n_fiters*4, normalization='instancenorm'),
+        #     UpSampling(n_fiters*4, n_fiters*2, normalization='instancenorm'),
+        #     UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
+        # )
 
-        self.third_upsample = nn.Sequential(
-            UpSampling(n_fiters*4, n_fiters*2, normalization='instancenorm'),
-            UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
-        )
+        # self.third_upsample = nn.Sequential(
+        #     UpSampling(n_fiters*4, n_fiters*2, normalization='instancenorm'),
+        #     UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
+        # )
 
-        self.fourth_upsample = nn.Sequential(
-            UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
-        )
+        # self.fourth_upsample = nn.Sequential(
+        #     UpSampling(n_fiters*2, n_fiters, normalization='instancenorm'),
+        # )
 
         self.final_conv = nn.Conv3d(16, 1, 3, 1, 1);
     
     def forward(self, x):
         u1 = self.first_upsample(x[-1]);
-        u2 = self.second_upsample(x[-2]);
-        u3 = self.third_upsample(x[-3]);
-        u4 = self.fourth_upsample(x[-4]);
-        out = self.final_conv(u1+u2+u3+u4);
+        # u2 = self.second_upsample(x[-2]);
+        # u3 = self.third_upsample(x[-3]);
+        # u4 = self.fourth_upsample(x[-4]);
+        out = self.final_conv(u1);
         return out;
         
 class VNet(nn.Module):
