@@ -516,7 +516,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='SSLMRI Testing', allow_abbrev=False);
     parser.add_argument('--segmentation', default=True, action='store_false', help='if true calculate results for segmentation, if false, shows an example of detecting all changes between two MRI scans')
-    parser.add_argument('--model-path', type=str, default='models/', help='path to pretrained models, add them beside code to "models" folders, all five models should be in seperate folders named f0,f1,f2,f3,f4')
+    parser.add_argument('--model-path', type=str, default='exp-new/', help='path to pretrained models, add them beside code to "models" folders, all five models should be in seperate folders named f0,f1,f2,f3,f4')
     parser.add_argument('--device', type=str, default='cuda', help='device to run model on');
     parser.add_argument('--gif', default=False, action='store_true', help='indicate to create a gif from output or show it using matplotlib, only for pretrained model');
     parser.add_argument('--use-cached', default=False, action='store_true', help='if true, used already cached predictions, if false, do prediction first before showing results');

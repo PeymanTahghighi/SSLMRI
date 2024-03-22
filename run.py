@@ -13,6 +13,7 @@ from monai.losses.dice import DiceLoss
 from utility import BounraryLoss
 from VNet import VNet
 from monai.networks.nets.swin_unetr import SwinUNETR
+from monai.networks.nets.vit import ViT
 import argparse
 
 def save_examples_miccai(model, loader,):
@@ -261,7 +262,7 @@ def train_miccai_pretrain(args, model, train_loader, optimizer, scalar):
                 lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
                 lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
                 lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1));
-                lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm1));
+                lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm2));
                 loss = (lih1 + lih2 + lhh + lh1 + lh2)/ args.virtual_batch_size;
 
             scalar.scale(loss).backward();
@@ -367,16 +368,15 @@ if __name__ == "__main__":
     parser.add_argument('--num-workers', default=0, type=int, help='num workers for data loader, should be equal to number of CPU cores');
     parser.add_argument('--bl-multiplier', default=10, type=int, help='boundary loss coefficient');
     parser.add_argument('--device', default='cuda', type=str, help='device to run models on');
-    parser.add_argument('--debug-train-data', default=False, action='store_true', help='debug training data for debugging purposes');
+    parser.add_argument('--debug-train-data', default=True, action='store_true', help='debug training data for debugging purposes');
     parser.add_argument('--pretrained', default=False, action='store_true', help='indicate wether to initalize with self-supervised pretrained  model or not');
-    parser.add_argument('--pretraining', default=False, action='store_true', help='indicate if we are doing self-supervised pretraining (True) or training of segmenation model (False)');
+    parser.add_argument('--pretraining', default=True  , action='store_true', help='indicate if we are doing self-supervised pretraining (True) or training of segmenation model (False)');
     parser.add_argument('--fold', default=0, type=int, help='which fold to train and test model on');
     parser.add_argument('--network', default='VNET', type=str, help='which model to use, SWINUNETR is the other option');
     parser.add_argument('--pretrain-path', default=os.path.join('models', 'pretraining', 'best_model.ckpt'), type=str, help='path to self-supervised pretrain model');
     parser.add_argument('--resume', default=False, action='store_true',  help='inidcate wether we are training from scratch or resume training');
     parser.add_argument('--cache-mri-data', default=False, action='store_true',  help='if true, it first generate testing set for self-supervised pretraining mode, should run only once');
     parser.add_argument('--num-cache-data', default=200,  help='number of examples to cache for testing of self-supervised pretraining');
-
     args = parser.parse_args();
 
     if args.cache_mri_data:

@@ -32,7 +32,7 @@ def calculate_metric_percase(pred, gt, simple = False):
     f1 = 0;
     if simple is False:
         if sgt!=0 and spred!=0:
-            hd = mp.hd95(pred, gt)
+            #hd = mp.hd95(pred, gt)
             label_gt = label(gt)
             label_gts = np.bincount(label_gt.flat)
             label_pred = label(pred)
@@ -90,7 +90,7 @@ def calculate_metric_percase(pred, gt, simple = False):
                 f1 = 0
             else:
                 f1 = (2 * sel * pl) / (sel+pl)
-        return dice, hd, f1;
+        return dice, 0, f1;
     else:
         return dice;
 
