@@ -15,6 +15,28 @@ def IoU(mri1, mri2):
     union = torch.sum(mri1 + mri2, dim = dims);
     return torch.mean(intersection / (union+1e-4));
 
+class BYOLLoss(object):
+    def __init__(self) -> None:
+        pass
+
+    def __call__(self, online, target, mask):
+        online = online.flatten(start_dim = 2);
+        target = target.flatten(start_dim = 2);
+        mask = mask.flatten(start_dim = 2);
+
+        online = online.transpose(-1,-2);
+        target = target.transpose(-1,-2);
+        mask = mask.transpose(-1,-2).squeeze();
+
+        # online = torch.nn.functional.normalize(online, p =2, dim=2);
+        # target = torch.nn.functional.normalize(target, p =2, dim=2);
+
+        loss1 = (1-torch.nn.functional.cosine_similarity(x1 = online, x2 = target, dim = 2)) * (1-mask);
+        loss2 = (1+(torch.nn.functional.cosine_similarity(x1 = online, x2 = target, dim = 2))) * (mask);
+        # a = (1 - torch.nn.functional.mse_loss(online, target)) * mask;
+        # loss2 =  ((- torch.nn.functional.mse_loss(online, target)) * mask).mean();
+        return (loss1 + loss2);
+
 class BounraryLoss(object):
     def __init__(self, sigmoid = True) -> None:
         self.sigmoid = sigmoid;

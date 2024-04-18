@@ -278,40 +278,43 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                     mask_c = ret_transforms[i]['thresh'];
                     mrimage_noisy = copy(mrimage_c);
                 else:
-                    mrimage_c = mrimage[:, int(mrimage.shape[1]/2-32):int(mrimage.shape[1]/2+32), int(mrimage.shape[2]/2-32):int(mrimage.shape[2]/2+32), int(mrimage.shape[3]/2-32):int(mrimage.shape[3]/2+32)];
-                    g_c = g[:, int(mrimage.shape[1]/2-32):int(mrimage.shape[1]/2+32), int(mrimage.shape[2]/2-32):int(mrimage.shape[2]/2+32), int(mrimage.shape[3]/2-32):int(mrimage.shape[3]/2+32)];
-                    mask_c = mrimage[:, int(mrimage.shape[1]/2-32):int(mrimage.shape[1]/2+32), int(mrimage.shape[2]/2-32):int(mrimage.shape[2]/2+32), int(mrimage.shape[3]/2-32):int(mrimage.shape[3]/2+32)];
+                    mrimage_c = mrimage[:, int(mrimage.shape[1]/2-48):int(mrimage.shape[1]/2+48), int(mrimage.shape[2]/2-48):int(mrimage.shape[2]/2+48), int(mrimage.shape[3]/2-48):int(mrimage.shape[3]/2+48)];
+                    g_c = g[:, int(mrimage.shape[1]/2-48):int(mrimage.shape[1]/2+48), int(mrimage.shape[2]/2-48):int(mrimage.shape[2]/2+48), int(mrimage.shape[3]/2-48):int(mrimage.shape[3]/2+48)];
+                    mask_c = mask[:, int(mrimage.shape[1]/2-48):int(mrimage.shape[1]/2+48), int(mrimage.shape[2]/2-48):int(mrimage.shape[2]/2+48), int(mrimage.shape[3]/2-48):int(mrimage.shape[3]/2+48)];
                     mrimage_noisy = copy(mrimage_c);
                     mrimage_c = torch.from_numpy(mrimage_c);
                     mrimage_noisy = torch.from_numpy(mrimage_noisy);
-                    
                     mask_c = torch.from_numpy(mask_c);
-
-                total_heatmap = torch.zeros_like(mrimage_noisy, dtype=torch.float64);
-
-                num_corrupted_patches = np.random.randint(1,5) if self.args.deterministic is False else 3;
+                
+                num_corrupted_patches = np.random.randint(1,5) if self.args.deterministic is False else 20;
 
                 mrimage_noisy, heatmap, noise, center = inpaint_3d(mrimage_noisy, g_c, num_corrupted_patches, self.args.deterministic)
-                total_heatmap += heatmap;
-                
-                total_heatmap = total_heatmap * mask_c;
-                mrimage_noisy = mrimage_noisy * mask_c;
-                mrimage_c = mrimage_c * mask_c;
 
-                total_heatmap_thresh = torch.where(total_heatmap > 0.5, 1.0, 0.0);
+                
+                #total_heatmap = total_heatmap * mask_c;
+                #mrimage_noisy = mrimage_noisy * mask_c;
+                #mrimage_c = mrimage_c * mask_c;
+
+                total_heatmap_thresh = torch.where(heatmap > 0, 1.0, 0.0);
                 part_first = mrimage_c * total_heatmap_thresh;
                 part_second = mrimage_noisy * total_heatmap_thresh;
-                if self.args.deterministic is True:
-                    mrimage_noisy = GibbsNoise(alpha = 0.65)(mrimage_noisy);
-                else:
-                    mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
+                # if self.args.deterministic is True:
+                #     mrimage_noisy = GibbsNoise(alpha = 0.65)(mrimage_noisy);
+                # else:
+                #     mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
 
-                diff = torch.abs(part_first - part_second) > (0.2);
+                diff = torch.abs(part_first - part_second) > (0.25);
 
                 total_heatmap_thresh = torch.where(diff > 0, 0, 1);
+                c = torch.nn.Conv3d(1, 1, self.args.patch_size, self.args.patch_size, bias = False);
+                c.requires_grad_ = False;
+                c.weight.data = torch.ones_like(c.weight.data);
+                patched = c((1-total_heatmap_thresh.unsqueeze(dim=0)).float());
+                patched = torch.where(patched > (self.args.patch_size**3) / 4, 1, 0);
+                patched = torch.nn.functional.upsample(patched.float(), (96,96,96));
                 
                 if self.args.debug_train_data:
-                    visualize_2d([mrimage_c, mrimage_noisy, total_heatmap, 1-total_heatmap_thresh, total_heatmap_thresh], center);
+                    visualize_2d([mrimage_c, mrimage_noisy, 1-total_heatmap_thresh, patched], center);
                 
                 mrimage_c = self.transforms(mrimage_c)[0];
                 mrimage_noisy = self.transforms(mrimage_noisy)[0];
@@ -327,7 +330,17 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
 
                     ret_total_heatmap = torch.concat([ret_total_heatmap, total_heatmap_thresh.unsqueeze(dim=0)], dim=0);
             
-            return ret_mrimage, ret_mrimage_noisy, ret_total_heatmap;
+            with torch.no_grad():
+                c = torch.nn.Conv3d(1, 1, self.args.patch_size, self.args.patch_size, bias = False);
+                c.requires_grad_ = False;
+                c.weight.data = torch.ones_like(c.weight.data);
+                patched = c((1-ret_total_heatmap).float());
+                patched = torch.where(patched >  (self.args.patch_size**3) / 4, 1, 0);
+            # print(patched.shape);
+            # print(patched);
+
+                
+            return ret_mrimage, ret_mrimage_noisy, ret_total_heatmap, patched;
         else:
             ret = self.mr_images[index];
             return ret;
@@ -669,6 +682,7 @@ def get_loader_pretrain_miccai(args):
     train_mri, test_mri = pickle.load(open(os.path.join('cache_miccai-2016', f'train_test_split.dmp'), 'rb'));
 
     mri_dataset_train = MICCAI_PRETRAIN_Dataset(args, train_mri[:1]);
+    
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=args.num_workers, pin_memory=True);
     mri_dataset_test = MICCAI_PRETRAIN_Dataset(args, test_mri[:1], train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=args.num_workers, pin_memory=True);
@@ -760,7 +774,7 @@ def inpaint_3d(img,
             else:
                 center = [img.shape[0]//2, img.shape[1]//2, img.shape[2]//2]
         else:
-            center = [pos_cords[1][50], pos_cords[2][50],pos_cords[3][50]]
+            center = [pos_cords[1][50*(n+1)], pos_cords[2][50*(n+1)],pos_cords[3][50*(n+1)]]
         
         cubes.append([center, size_x, size_y, size_z]);
     
@@ -774,15 +788,17 @@ def inpaint_3d(img,
     #cube = transform(cube);
     cube_thresh = (cube>0)
 
+    smoothness = np.random.randint(3,7)
     cube_thresh = GaussianSmooth(4, approx='erf')(cube_thresh);
     cube_thresh = cube_thresh / (torch.max(cube_thresh) + 1e-4);
     #================
 
-    noise = GaussianSmooth(15)(mri);
+    smoothness = np.random.randint(10,20)
+    noise = GaussianSmooth(10)(mri);
     mri_after = (1-cube_thresh)*mri + (cube_thresh*noise);
-    noise = GaussianSmooth(7)(mask_g.float());
+    #noise = GaussianSmooth(7)(mask_g.float());
     
-    mri_after = torch.clip(mri_after, 0, 1);
+    #mri_after = torch.clip(mri_after, 0, 1);
     #mri_after = (mri_after*255).astype("uint8")
     #visualize_2d(mri_after, cube_thresh, slice=center[0:]);
     return mri_after, cube_thresh, noise, center;
