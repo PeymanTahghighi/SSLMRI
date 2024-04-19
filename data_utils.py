@@ -262,7 +262,7 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
             mrimage = np.expand_dims(mrimage, axis=0);
             mrimage = mrimage / (np.max(mrimage)+1e-4);
 
-            g = (mrimage > 0.9);
+            g = (mrimage > 0.0 );
             g = torch.from_numpy(g);
             ret_mrimage = None;
             ret_mrimage_noisy = None;
@@ -286,7 +286,7 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                     mrimage_noisy = torch.from_numpy(mrimage_noisy);
                     mask_c = torch.from_numpy(mask_c);
                 
-                num_corrupted_patches = np.random.randint(1,5) if self.args.deterministic is False else 20;
+                num_corrupted_patches = self.args.num_inpaint if self.args.deterministic is False else 20;
 
                 mrimage_noisy, heatmap, noise, center = inpaint_3d(mrimage_noisy, g_c, num_corrupted_patches, self.args.deterministic)
 
@@ -298,23 +298,23 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                 total_heatmap_thresh = torch.where(heatmap > 0, 1.0, 0.0);
                 part_first = mrimage_c * total_heatmap_thresh;
                 part_second = mrimage_noisy * total_heatmap_thresh;
-                # if self.args.deterministic is True:
-                #     mrimage_noisy = GibbsNoise(alpha = 0.65)(mrimage_noisy);
-                # else:
-                #     mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
+                if self.args.deterministic is True:
+                    mrimage_noisy = GibbsNoise(alpha = 0.65)(mrimage_noisy);
+                else:
+                    mrimage_noisy = self.augment_noisy_image(mrimage_noisy);
 
-                diff = torch.abs(part_first - part_second) > (0.25);
+                diff = torch.abs(part_first - part_second) > (self.args.diff_thresh);
 
                 total_heatmap_thresh = torch.where(diff > 0, 0, 1);
-                c = torch.nn.Conv3d(1, 1, self.args.patch_size, self.args.patch_size, bias = False);
-                c.requires_grad_ = False;
-                c.weight.data = torch.ones_like(c.weight.data);
-                patched = c((1-total_heatmap_thresh.unsqueeze(dim=0)).float());
-                patched = torch.where(patched > (self.args.patch_size**3) / 4, 1, 0);
-                patched = torch.nn.functional.upsample(patched.float(), (96,96,96));
+                # c = torch.nn.Conv3d(1, 1, self.args.patch_size, self.args.patch_size, bias = False);
+                # c.requires_grad_ = False;
+                # c.weight.data = torch.ones_like(c.weight.data);
+                # patched = c((1-total_heatmap_thresh.unsqueeze(dim=0)).float());
+                # patched = torch.where(patched > (self.args.patch_size**3) / 4, 1, 0);
+                # patched = torch.nn.functional.upsample(patched.float(), (96,96,96));
                 
                 if self.args.debug_train_data:
-                    visualize_2d([mrimage_c, mrimage_noisy, 1-total_heatmap_thresh, patched], center);
+                    visualize_2d([mrimage_c, mrimage_noisy, 1-total_heatmap_thresh], center);
                 
                 mrimage_c = self.transforms(mrimage_c)[0];
                 mrimage_noisy = self.transforms(mrimage_noisy)[0];
@@ -330,17 +330,16 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
 
                     ret_total_heatmap = torch.concat([ret_total_heatmap, total_heatmap_thresh.unsqueeze(dim=0)], dim=0);
             
-            with torch.no_grad():
-                c = torch.nn.Conv3d(1, 1, self.args.patch_size, self.args.patch_size, bias = False);
-                c.requires_grad_ = False;
-                c.weight.data = torch.ones_like(c.weight.data);
-                patched = c((1-ret_total_heatmap).float());
-                patched = torch.where(patched >  (self.args.patch_size**3) / 4, 1, 0);
-            # print(patched.shape);
-            # print(patched);
+            # with torch.no_grad():
+            #     c = torch.nn.Conv3d(1, 1, self.args.patch_size, self.args.patch_size, bias = False);
+            #     c.requires_grad_ = False;
+            #     c.weight.data = torch.ones_like(c.weight.data);
+            #     patched = c((1-ret_total_heatmap).float());
+            #     patched = torch.where(patched >  (self.args.patch_size**3) / 4, 1, 0);
+
 
                 
-            return ret_mrimage, ret_mrimage_noisy, ret_total_heatmap, patched;
+            return ret_mrimage, ret_mrimage_noisy, ret_total_heatmap;
         else:
             ret = self.mr_images[index];
             return ret;
@@ -681,10 +680,9 @@ def get_loader_pretrain_miccai(args):
     """
     train_mri, test_mri = pickle.load(open(os.path.join('cache_miccai-2016', f'train_test_split.dmp'), 'rb'));
 
-    mri_dataset_train = MICCAI_PRETRAIN_Dataset(args, train_mri[:1]);
-    
+    mri_dataset_train = MICCAI_PRETRAIN_Dataset(args, train_mri if args.dataset_size == 'all' else train_mri[:1]);
     train_loader = DataLoader(mri_dataset_train, 1, True, num_workers=args.num_workers, pin_memory=True);
-    mri_dataset_test = MICCAI_PRETRAIN_Dataset(args, test_mri[:1], train=False);
+    mri_dataset_test = MICCAI_PRETRAIN_Dataset(args, test_mri if args.dataset_size == 'all' else test_mri[:1], train=False);
     test_loader = DataLoader(mri_dataset_test, 1, False, num_workers=args.num_workers, pin_memory=True);
 
     return train_loader, test_loader; 
