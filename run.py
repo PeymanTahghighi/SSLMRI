@@ -261,12 +261,17 @@ def train_miccai_pretrain(args, model, train_loader, optimizer, scalar):
             with torch.cuda.amp.autocast_mode.autocast():
                 hm1 = model(volume_batch1);
                 hm2 = model(volume_batch2);
-                lih1 = F.l1_loss((curr_mri+hm1), curr_mri_noisy);
-                lih2 = F.l1_loss((curr_mri_noisy+hm2), curr_mri);
-                lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
-                lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1)) * args.mask_loss_multiplier;
-                lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm2)) * args.mask_loss_multiplier;
-                loss = (lih1 + lih2 + lhh + lh1 + lh2)/ args.virtual_batch_size;
+                curr_mri *= (1-curr_heatmap);
+                curr_mri_noisy *= (1-curr_heatmap);
+
+
+                lih1 = F.mse_loss((curr_mri+hm1), curr_mri_noisy, reduce=False);
+                lih2 = F.mse_loss((curr_mri_noisy+hm2), curr_mri, reduce=False);
+                # lhh = F.l1_loss((hm1+hm2), torch.zeros_like(hm1));
+                # lh1 = F.l1_loss((hm1)*curr_heatmap, torch.zeros_like(hm1)) * args.mask_loss_multiplier;
+                # lh2 = F.l1_loss((hm2)*curr_heatmap, torch.zeros_like(hm2)) * args.mask_loss_multiplier;
+                loss = (lih1 + lih2)/ args.virtual_batch_size;
+                loss = loss.mean();
 
             scalar.scale(loss).backward();
             curr_loss += loss.item();

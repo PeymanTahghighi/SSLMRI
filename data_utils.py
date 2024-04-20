@@ -222,7 +222,7 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
 
         self.transforms = NormalizeIntensity(subtrahend=0.5, divisor=0.5);
         self.crop = RandCropByPosNegLabeld(
-            keys=['image', 'gradient', 'thresh', 'mask'], 
+            keys=['image', 'mask'], 
             label_key='mask', 
             spatial_size= (args.crop_size_w, args.crop_size_h, args.crop_size_d),
             pos=1, 
@@ -237,14 +237,17 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
 
         if train or cache:
             for patient_path in mr_images:
+                base_path = os.path.dirname(patient_path);
+                base_path = base_path[:base_path.rfind('\\')];
 
                 mri = nib.load(patient_path);
-                gradient_file_path = patient_path[:patient_path.find('.')];
                 mri = mri.get_fdata();
                 mri = window_center_adjustment(mri);
 
-                gradient = pickle.load(open(f'{gradient_file_path}.gradient', 'rb'));
-                self.mr_images.append([mri, gradient])
+                brain_mask = nib.load(os.path.join(base_path, 'Masks', 'Brain_Mask.nii.gz'));
+                brain_mask = brain_mask.get_fdata();
+
+                self.mr_images.append([mri, brain_mask[None,:,:,:]])
 
         else:
             for mr in mr_images:
@@ -256,30 +259,24 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
 
     def __getitem__(self, index):
         if self.train:
-            mrimage, gr = self.mr_images[index];
-            mask = mrimage > threshold_otsu(mrimage);            
-            mask = np.expand_dims(mask, axis=0);
+            mrimage, mask = self.mr_images[index];
             mrimage = np.expand_dims(mrimage, axis=0);
             mrimage = mrimage / (np.max(mrimage)+1e-4);
 
-            g = (mrimage > 0.0 );
-            g = torch.from_numpy(g);
             ret_mrimage = None;
             ret_mrimage_noisy = None;
             ret_total_heatmap = None;
 
             if self.args.deterministic is False:
-                ret_transforms = self.crop({'image': mrimage,'gradient': g, 'thresh': mask, 'mask': g});
+                ret_transforms = self.crop({'image': mrimage, 'mask': mask});
             
             for i in range(self.args.sample_per_mri if self.cache is False else 1):
                 if self.args.deterministic is False:
                     mrimage_c = ret_transforms[i]['image'];
-                    g_c = ret_transforms[i]['gradient'];
-                    mask_c = ret_transforms[i]['thresh'];
+                    mask_c = ret_transforms[i]['mask'];
                     mrimage_noisy = copy(mrimage_c);
                 else:
                     mrimage_c = mrimage[:, int(mrimage.shape[1]/2-48):int(mrimage.shape[1]/2+48), int(mrimage.shape[2]/2-48):int(mrimage.shape[2]/2+48), int(mrimage.shape[3]/2-48):int(mrimage.shape[3]/2+48)];
-                    g_c = g[:, int(mrimage.shape[1]/2-48):int(mrimage.shape[1]/2+48), int(mrimage.shape[2]/2-48):int(mrimage.shape[2]/2+48), int(mrimage.shape[3]/2-48):int(mrimage.shape[3]/2+48)];
                     mask_c = mask[:, int(mrimage.shape[1]/2-48):int(mrimage.shape[1]/2+48), int(mrimage.shape[2]/2-48):int(mrimage.shape[2]/2+48), int(mrimage.shape[3]/2-48):int(mrimage.shape[3]/2+48)];
                     mrimage_noisy = copy(mrimage_c);
                     mrimage_c = torch.from_numpy(mrimage_c);
@@ -288,11 +285,11 @@ class MICCAI_PRETRAIN_Dataset(Dataset):
                 
                 num_corrupted_patches = self.args.num_inpaint if self.args.deterministic is False else 20;
 
-                mrimage_noisy, heatmap, noise, center = inpaint_3d(mrimage_noisy, g_c, num_corrupted_patches, self.args.deterministic)
+                mrimage_noisy, heatmap, noise, center = inpaint_3d(mrimage_noisy, mask_c, num_corrupted_patches, self.args.deterministic)
 
                 
                 #total_heatmap = total_heatmap * mask_c;
-                #mrimage_noisy = mrimage_noisy * mask_c;
+                mrimage_noisy = mrimage_noisy * mask_c;
                 #mrimage_c = mrimage_c * mask_c;
 
                 total_heatmap_thresh = torch.where(heatmap > 0, 1.0, 0.0);
@@ -787,12 +784,12 @@ def inpaint_3d(img,
     cube_thresh = (cube>0)
 
     smoothness = np.random.randint(3,7)
-    cube_thresh = GaussianSmooth(4, approx='erf')(cube_thresh);
+    cube_thresh = GaussianSmooth(smoothness, approx='erf')(cube_thresh);
     cube_thresh = cube_thresh / (torch.max(cube_thresh) + 1e-4);
     #================
 
-    smoothness = np.random.randint(10,20)
-    noise = GaussianSmooth(10)(mri);
+    smoothness = np.random.randint(15,20)
+    noise = GaussianSmooth(smoothness)(mri);
     mri_after = (1-cube_thresh)*mri + (cube_thresh*noise);
     #noise = GaussianSmooth(7)(mask_g.float());
     
